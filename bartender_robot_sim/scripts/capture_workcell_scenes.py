@@ -14,7 +14,7 @@ contract with vlm/training (vlm_labels.py and the harness):
 
     <out>/<scene>/scene.json    bottles, glasses ([]), camera, appearance, params
     <out>/<scene>/0000.json     in_gripper, settled object poses, arm
-    <out>/<scene>/0000_cam_rgb.png, 0000_cam_labels.png   (labels: bottles 1-3, distractors 20-29)
+    <out>/<scene>/0000_cam_rgb.png, 0000_cam_labels.png   (labels: LABELS below, distractors 20-29)
 
 --params takes a JSON file overriding SCENE_PARAMS, which is how the VLM
 harness steers what gets generated towards the cases the model gets wrong.
@@ -47,20 +47,32 @@ MIN_GAP = 0.11
 HIDDEN_Z = -5.0
 UPRIGHT_MAX_TILT_DEG = 20
 
-# Bottle -> its model in workcell_world.sdf. The real workcell has no glass.
-OBJECTS = {'whiskey': 'jack_daniels_bottle', 'cola': 'cola_bottle', 'beer': 'beer_bottle'}
+# The real bar's six drinks -> their models in workcell_world.sdf. The real
+# workcell has no glass.
+OBJECTS = {'whiskey': 'jack_daniels_bottle', 'vodka': 'zubrowka_bottle', 'liqueur': 'jagermeister_bottle',
+           'beer': 'beer_bottle', 'gin': 'tenjaku_bottle', 'wine': 'frontera_bottle'}
+# Segmentation labels: vlm training/vlm_labels.py LABEL_IDS, which never
+# renumbers (old captures keep their meaning). 2 was cola and stays retired.
+LABELS = {'whiskey': 1, 'beer': 3, 'vodka': 4, 'liqueur': 5, 'gin': 6, 'wine': 7}
+# Bottles on the real bar that are not served, as named distractors: their own
+# look and label, placed like a distractor. Layout key 'distractor_<name>'.
+NAMED_DISTRACTORS = {'ballantines': 'ballantines_bottle'}
+MODELS = {**OBJECTS, **{f'distractor_{k}': m for k, m in NAMED_DISTRACTORS.items()}}
+# In workcell_world.sdf for the control stack's recipes, but not on the real
+# bar: parked off the table for every capture.
+PARKED = ('cola_bottle',)
 BEER_CAP_HEIGHT = 0.2581  # the beer's lip above its base; see bar_world.sdf
 # Distractor i gets label 20 + i: vlm_labels treats 20-29 as distractors, and
 # separate labels keep two distractors from merging into one box. Each is a
 # list of (geometry, height of its centre above the model's base), so the base
 # is the origin and a distractor stands on the table like a bottle does.
-# `wine` is a bottle that is none of ours: the hard negative.
+# Bottle-shaped hard negatives are the named ones (Ballantine's); wine is served now.
 DISTRACTORS = [
     ('box', [('<box><size>0.07 0.07 0.16</size></box>', 0.08)]),
     ('can', [('<cylinder><radius>0.033</radius><length>0.12</length></cylinder>', 0.06)]),
     ('carton', [('<box><size>0.10 0.05 0.20</size></box>', 0.10)]),
-    ('wine', [('<cylinder><radius>0.037</radius><length>0.21</length></cylinder>', 0.105),
-              ('<cylinder><radius>0.014</radius><length>0.09</length></cylinder>', 0.255)]),
+    ('thermos', [('<cylinder><radius>0.040</radius><length>0.22</length></cylinder>', 0.11),
+                 ('<cylinder><radius>0.036</radius><length>0.05</length></cylinder>', 0.245)]),
     ('mug', [('<cylinder><radius>0.045</radius><length>0.10</length></cylinder>', 0.05)]),
     ('ball', [('<sphere><radius>0.04</radius></sphere>', 0.04)]),
     ('spray', [('<cylinder><radius>0.025</radius><length>0.22</length></cylinder>', 0.11)]),
@@ -71,7 +83,8 @@ SCENE_PARAMS = {
     'bottle_p': 0.7,          # each bottle is on the table
     'fallen_p': 0.08,         # a present bottle lies on its side
     'distractors': [0.3, 0.35, 0.25, 0.1],  # P(0, 1, 2, 3 distractors)
-    'distractor_kinds': None,  # restrict to these DISTRACTORS names, e.g. ["wine"]
+    'distractor_kinds': None,  # restrict to these DISTRACTORS names, e.g. ["thermos"]
+    'named_distractor_p': 0.5,  # each NAMED_DISTRACTORS bottle is on the table
     'block_p': 0.4,           # a distractor stands between the arm and a bottle
     'arm_pose': {'home': 0.25, 'over_table': 0.4, 'over_bottle': 0.35},
     'camera': {'front': 0.35, 'side': 0.25, 'overhead': 0.2, 'corner': 0.2},
@@ -174,6 +187,12 @@ def sample_layout(rng, params):
         placed[f'distractor{i}'] = {'xy': spot or free_spot() or (1.2, 0.1),
                                     'yaw': rng.uniform(-math.pi, math.pi), 'fallen': False,
                                     'kind': DISTRACTORS[i][0]}
+    for name in NAMED_DISTRACTORS:
+        if rng.random() < params['named_distractor_p']:
+            spot = free_spot()
+            if spot:
+                placed[f'distractor_{name}'] = {'xy': spot, 'yaw': rng.uniform(-math.pi, math.pi),
+                                                'fallen': False, 'kind': name}
     return placed
 
 
@@ -456,7 +475,7 @@ class Sim:
 
 
 def model_name(name):
-    return OBJECTS.get(name, name)
+    return MODELS.get(name, name)
 
 
 def place(model, spot, hide_x):
@@ -567,16 +586,20 @@ def main():
     sim = Sim()
     run_started, done, resumed, error = time.monotonic(), [], 0, None
     try:
-        names = list(OBJECTS) + [f'distractor{i}' for i in range(len(DISTRACTORS))]
+        names = list(MODELS) + [f'distractor{i}' for i in range(len(DISTRACTORS))]
         sim.spin(2.0)
-        if sim.pose(OBJECTS['beer']) is None:
-            raise RuntimeError('no bottles in the world: is this workcell_world.sdf from this branch?')
+        missing = [m for m in MODELS.values() if sim.pose(m) is None]
+        if missing:
+            raise RuntimeError(f'{missing} not in the world: is this workcell_world.sdf from this branch?')
+        for i, model in enumerate(PARKED):
+            if sim.pose(model) is not None:
+                set_pose(model, 30 + i, 10, HIDDEN_Z)
         for i, (_, parts) in enumerate(DISTRACTORS):
             if sim.pose(f'distractor{i}') is None:
                 spawn(f'distractor{i}', distractor_sdf(f'distractor{i}', parts, 20 + i))
-        for i, bottle in enumerate(OBJECTS):
+        for bottle in OBJECTS:
             if sim.pose(f'held_{bottle}') is None:
-                spawn(f'held_{bottle}', held_sdf(bottle, i + 1))
+                spawn(f'held_{bottle}', held_sdf(bottle, LABELS[bottle]))
         if sim.pose('vlm_camera') is None:
             spawn('vlm_camera', camera_sdf(), z=2.0)
         sim.spin(2.0)

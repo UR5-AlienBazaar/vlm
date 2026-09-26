@@ -6,13 +6,13 @@ from PIL import Image
 from workcell import WEIGHTS, blocked, gold_answer, next_action, order_for, scene_truth, score
 
 
-def make_scene(root, name='w900_00000', objects=None, painted=('whiskey', 'cola'), camera='front'):
-    """A synthetic workcell scene in the capture layout: whiskey and cola painted, beer absent."""
+def make_scene(root, name='w900_00000', objects=None, painted=('whiskey', 'vodka'), camera='front'):
+    """A synthetic workcell scene in the capture layout: whiskey and vodka painted, beer absent."""
     scene = root / name
     scene.mkdir(parents=True)
     labels = np.zeros((400, 640), np.uint8)
-    boxes = {'whiskey': (100, 160, 200, 260), 'cola': (300, 160, 360, 220), 'beer': (450, 160, 500, 220)}
-    ids = {'whiskey': 1, 'cola': 2, 'beer': 3}
+    boxes = {'whiskey': (100, 160, 200, 260), 'vodka': (300, 160, 360, 220), 'beer': (450, 160, 500, 220)}
+    ids = {'whiskey': 1, 'vodka': 4, 'beer': 3}
     for bottle in painted:
         y0, x0, y1, x1 = boxes[bottle]
         labels[y0:y1, x0:x1] = ids[bottle]
@@ -20,12 +20,12 @@ def make_scene(root, name='w900_00000', objects=None, painted=('whiskey', 'cola'
     Image.fromarray(np.zeros((400, 640, 3), np.uint8)).save(scene / '0000_cam_rgb.png')
     objects = objects or {
         'whiskey': {'on_table': True, 'xy': [1.0, 0.35], 'upright': True, 'tilt_deg': 0.0},
-        'cola': {'on_table': True, 'xy': [0.9, 0.6], 'upright': False, 'tilt_deg': 88.0},
+        'vodka': {'on_table': True, 'xy': [0.9, 0.6], 'upright': False, 'tilt_deg': 88.0},
     }
     (scene / '0000.json').write_text(json.dumps({'in_gripper': None, 'objects': objects,
                                                  'arm': {'kind': 'home', 'joints': [0] * 6, 'reached': True}}))
     (scene / 'scene.json').write_text(json.dumps({
-        'bottles': ['whiskey', 'cola', 'beer'], 'glasses': [], 'kind': 'workcell',
+        'bottles': ['whiskey', 'vodka', 'liqueur', 'beer', 'gin', 'wine'], 'glasses': [], 'kind': 'workcell',
         'camera': {'family': camera}, 'arm_base': [0.35, 0.35]}))
     return scene
 
@@ -51,7 +51,8 @@ def test_scene_truth_reads_the_capture_layout(tmp_path):
     truth = scene_truth(make_scene(tmp_path))
     b = truth['bottles']
     assert b['whiskey']['visible'] and b['whiskey']['upright'] and b['whiskey']['bbox'] == [250, 250, 406, 500]
-    assert b['cola']['visible'] and b['cola']['upright'] is False
+    assert b['vodka']['visible'] and b['vodka']['upright'] is False
+    assert not b['gin']['visible'] and b['gin']['on_table'] is False
     assert not b['beer']['visible'] and b['beer']['upright'] is None
     assert truth['order'] == order_for('w900_00000')
     assert truth['buckets']['camera'] == 'front'

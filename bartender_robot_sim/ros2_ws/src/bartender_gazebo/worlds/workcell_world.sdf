@@ -132,6 +132,51 @@
       <name>beer_cap</name>
       <pose>0.75 0.50 1.0081 0 0 0</pose>
     </include>
+
+    <!-- The rest of the real bar (models from make_real_bar_bottles.py):
+         vodka 4, liqueur 5, gin 6, wine 7, and Ballantine's, which is not
+         served, as a named distractor (29). cola_bottle above is not on the
+         real bar; the capture parks it and keeps label 2 retired. -->
+    <include>
+      <uri>model://zubrowka_bottle</uri>
+      <name>zubrowka_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>4</label>
+      </plugin>
+      <pose>1.00 0.20 0.75 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://jagermeister_bottle</uri>
+      <name>jagermeister_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>5</label>
+      </plugin>
+      <pose>1.00 0.35 0.75 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://tenjaku_bottle</uri>
+      <name>tenjaku_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>6</label>
+      </plugin>
+      <pose>1.00 0.50 0.75 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://frontera_bottle</uri>
+      <name>frontera_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>7</label>
+      </plugin>
+      <pose>1.20 0.20 0.75 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://ballantines_bottle</uri>
+      <name>ballantines_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>29</label>
+      </plugin>
+      <pose>1.20 0.50 0.75 0 0 0</pose>
+    </include>
     <!-- A fixed view of the whole cell for watching the twin
          (scripts/workcell_viewer.py). Not a model of the real camera, whose
          mount is not decided yet; the VLM captures use their own. -->

@@ -104,6 +104,21 @@ def test_world_labels_match_label_ids():
                       'beer_bottle': LABEL_IDS['beer'], 'serving_glass': LABEL_IDS['glass']}
 
 
+def test_workcell_world_labels_match_label_ids():
+    import xml.etree.ElementTree as ET
+    from pathlib import Path
+
+    from vlm_labels import DISTRACTOR_IDS
+
+    world = Path(__file__).parents[1] / 'bartender_robot_sim/ros2_ws/src/bartender_gazebo/worlds/workcell_world.sdf'
+    labels = {inc.findtext('name'): int(inc.findtext('plugin/label'))
+              for inc in ET.parse(world).iter('include') if inc.find('plugin/label') is not None}
+    assert labels == {'jack_daniels_bottle': LABEL_IDS['whiskey'], 'cola_bottle': LABEL_IDS['cola'],
+                      'beer_bottle': LABEL_IDS['beer'], 'zubrowka_bottle': LABEL_IDS['vodka'],
+                      'jagermeister_bottle': LABEL_IDS['liqueur'], 'tenjaku_bottle': LABEL_IDS['gin'],
+                      'frontera_bottle': LABEL_IDS['wine'], 'ballantines_bottle': LABEL_IDS['ballantines']}
+    assert LABEL_IDS['ballantines'] in DISTRACTOR_IDS
+
 def test_pour_stride_thins_pour_frames_only(tmp_path):
     raw = tmp_path / 'raw'
     for name, kind in (('pour', 'pour'), ('still', 'static')):

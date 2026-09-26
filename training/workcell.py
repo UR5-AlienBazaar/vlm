@@ -16,7 +16,7 @@ from PIL import Image
 
 from vlm_labels import LABEL_IDS, bbox, iou_boxes
 
-BOTTLES = ('whiskey', 'cola', 'beer')
+BOTTLES = ('whiskey', 'vodka', 'liqueur', 'beer', 'gin', 'wine')  # the real bar's drinks
 # A distractor this close to the straight line from the arm base to a bottle
 # is in the gripper's way: its ~5cm radius plus the open fingers' clearance.
 BLOCK_RADIUS = 0.07

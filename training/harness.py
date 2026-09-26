@@ -28,12 +28,14 @@ from results import (_table, STYLE, connect, finish_experiment, log_metrics, log
 from workcell import FIELDS, gold_answer, read_answer, scene_truth, score
 
 SEED_PROMPT = (
-    'You are the eyes of a UR5 robot bartender looking at its work table. The table may hold three '
-    'bottles: whiskey (a square Jack Daniel\'s bottle), cola (a cola bottle) and beer (a brown beer '
-    'bottle with a cap). Any other object (a box, a can, a carton) is a distractor, not a bottle.\n'
+    'You are the eyes of a UR5 robot bartender looking at its work table. The table may hold six '
+    'bottles: whiskey (a square Jack Daniel\'s bottle with a black label), vodka (a round clear '
+    'Zubrowka bottle), liqueur (a square dark green Jagermeister bottle), beer (a green Heineken '
+    'bottle with a cap), gin (a Tenjaku bottle) and wine (a Frontera white wine bottle). Any other '
+    'object, including a Ballantine\'s bottle, a box, a can or a thermos, is a distractor, not one of these.\n'
     'The order is: pick {order}.\n'
-    'Answer with JSON only, listing all three bottles:\n'
-    '{"bottles": [{"name": "whiskey|cola|beer", "visible": true|false, "upright": true|false|null, '
+    'Answer with JSON only, listing all six bottles:\n'
+    '{"bottles": [{"name": "whiskey|vodka|liqueur|beer|gin|wine", "visible": true|false, "upright": true|false|null, '
     '"blocked": true|false|null, "bbox": [x0, y0, x1, y1] or null}], '
     '"next_action": {"action": "pick|clear_path|report_fallen|not_found", "target": "{order}"}}\n'
     'bbox is in 0-1000 image coordinates. upright is false when a bottle lies on its side. blocked is '
