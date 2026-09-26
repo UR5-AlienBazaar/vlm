@@ -38,6 +38,9 @@ docker_args=(
     --env "HOME=${CONTAINER_HOME_DIR}"
     --env "DISPLAY=${DISPLAY:-}"
     --env "IGN_PARTITION=${IGN_PARTITION:-bartender-robot-${HOST_UID}}"
+    # With --network host, sims running side by side share DDS unless each
+    # gets its own domain; they would then drive each other's arms.
+    --env "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}"
     --env "IGN_GAZEBO_RESOURCE_PATH=/workspace/models"
     --env "QT_X11_NO_MITSHM=1"
     --env "XDG_RUNTIME_DIR=${CONTAINER_RUNTIME_DIR}"
