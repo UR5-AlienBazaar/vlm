@@ -8,7 +8,7 @@ Run inside the sim container while the twin is up (scripts/workcell_vlm_twin.sh)
 Each scene: the bottles (in workcell_world.sdf) and some distractors are
 placed on the table or knocked over, the lighting and colours change, the
 mock arm moves to a pose the twin copies (sometimes hovering over a bottle so
-it hides part of it), one camera is put at a random viewpoint, and one RGB +
+it hides part of it, sometimes holding one), one camera is put at a random viewpoint, and one RGB +
 segmentation pair is saved with the objects' settled poses. The layout is the
 contract with vlm/training (vlm_labels.py and the harness):
 
@@ -74,6 +74,7 @@ SCENE_PARAMS = {
     'arm_pose': {'home': 0.25, 'over_table': 0.4, 'over_bottle': 0.35},
     'camera': {'front': 0.35, 'side': 0.25, 'overhead': 0.2, 'corner': 0.2},
     'appearance_p': 0.8,      # lighting and colours are randomized; else the world's own look
+    'held_p': 0.15,           # the arm holds one of the bottles over the table
 }
 # Viewpoint families: eye (centre, jitter) and the point it looks at. The real
 # camera's mount is not decided, so every scene draws one; the family is
@@ -103,6 +104,13 @@ WRIST_LATERAL = 0.1333
 # Wrist this high over the table keeps the gripper's fingers just above a
 # bottle's top (~0.27), so a hover hides the bottle rather than hits it.
 HOVER_Z = (0.45, 0.55)
+# A held bottle is a static, collision-free copy of it (the mock gripper
+# cannot grasp) hung under the wrist: wrist_3 to fingertip centre is
+# ~0.10 (flange) + ~0.14 (2F-85), gripped ~0.12 up the bottle. Estimated
+# from the datasheets; check by eye when changing it.
+HOLD_DROP = 0.36
+GRIP_OPEN, GRIP_CLOSED = 0.02, 0.12  # knuckle rad; 0.12 closes on a ~77mm bottle
+MODELS_DIR = Path(__file__).resolve().parents[1] / 'models'
 TABLE_COLOURS = [(0.62, 0.50, 0.36), (0.45, 0.33, 0.22), (0.80, 0.80, 0.78),
                  (0.30, 0.30, 0.32), (0.12, 0.12, 0.12), (0.55, 0.60, 0.65)]
 TMP = Path('/tmp/workcell_vlm')
@@ -167,6 +175,16 @@ def sample_layout(rng, params):
     return placed
 
 
+def sample_held(rng, params, layout):
+    """Maybe take one placed, standing bottle off the table and into the gripper."""
+    standing = [b for b in OBJECTS if b in layout and not layout[b]['fallen']]
+    if not standing or rng.random() >= params['held_p']:
+        return None
+    held = rng.choice(standing)
+    del layout[held]
+    return held
+
+
 def arm_ik(reach, height):
     """Shoulder lift and elbow that put wrist_3 `reach` from the base and `height`
     above the table with the tool pointing down, or None if out of reach."""
@@ -185,7 +203,12 @@ def arm_joints(pan, lift, elbow, wrist_3=0.0):
     return [pan, lift, elbow, -math.pi / 2 - (lift + elbow), -math.pi / 2, wrist_3]
 
 
-def sample_arm(rng, params, layout):
+def sample_arm(rng, params, layout, held=None):
+    if held:
+        # High enough that the bottle hanging below the wrist clears the table.
+        ik = arm_ik(rng.uniform(0.40, 0.70), rng.uniform(HOLD_DROP + 0.08, HOLD_DROP + 0.25))
+        # +-0.6 rad keeps the wrist over the table; +-1.0 put it past the long edges.
+        return 'holding', held, arm_joints(rng.uniform(-0.6, 0.6) + PAN_OFFSET, *ik, rng.uniform(-math.pi, math.pi))
     kind = _choice(rng, params['arm_pose'])
     bottles = [b for b in OBJECTS if b in layout]
     if kind == 'over_bottle' and bottles:
@@ -304,6 +327,19 @@ def distractor_sdf(name, parts, label):
             f'</inertia></inertial>{shapes}</link>{LABEL_PLUGIN.format(label)}</model></sdf>')
 
 
+def held_sdf(bottle, label):
+    """The bottle's own model, static and visual-only, under the name held_<bottle>."""
+    model = OBJECTS[bottle]
+    sdf = (MODELS_DIR / model / 'model.sdf').read_text()
+    for tag in ('collision', 'inertial', 'plugin'):
+        sdf = re.sub(rf'<{tag}\b.*?</{tag}>', '', sdf, flags=re.S)
+    # Mesh URIs are relative to model.sdf, and the copy is written elsewhere.
+    sdf = sdf.replace('<uri>meshes/', f'<uri>model://{model}/meshes/')
+    sdf = re.sub(r'<model name="[^"]*">', f'<model name="held_{bottle}"><static>true</static>', sdf, count=1)
+    head, _, tail = sdf.rpartition('</model>')
+    return head + LABEL_PLUGIN.format(label) + '</model>' + tail
+
+
 def camera_sdf():
     w, h = CAM_SIZE
     cam = (f'<camera><horizontal_fov>{CAM_HFOV}</horizontal_fov><image><width>{w}</width>'
@@ -321,7 +357,7 @@ def camera_sdf():
 class Sim:
     def __init__(self):
         import rclpy
-        from control_msgs.action import FollowJointTrajectory
+        from control_msgs.action import FollowJointTrajectory, GripperCommand
         from rclpy.action import ActionClient
         from sensor_msgs.msg import Image, JointState
         from tf2_msgs.msg import TFMessage
@@ -347,6 +383,8 @@ class Sim:
             lambda m: self.joints.update(zip(m.name, m.position)), 2)
         self.arm = ActionClient(self.node, FollowJointTrajectory, '/ur_arm_controller/follow_joint_trajectory')
         self.FollowJointTrajectory = FollowJointTrajectory
+        self.gripper = ActionClient(self.node, GripperCommand, '/gripper_controller/gripper_cmd')
+        self.GripperCommand = GripperCommand
 
     def close(self):
         self.bridge.terminate()
@@ -384,6 +422,13 @@ class Sim:
                 return True
             self.spin(0.1)
         return False
+
+    def grip(self, position):
+        """Open or close the mock gripper; the twin copies the knuckle. Fire and forget."""
+        if self.gripper.wait_for_server(timeout_sec=5):
+            goal = self.GripperCommand.Goal()
+            goal.command.position, goal.command.max_effort = position, 50.0
+            self.gripper.send_goal_async(goal)
 
     def twin_joints(self):
         return [round(self.joints.get(j, float('nan')), 3) for j in ARM_JOINTS]
@@ -469,8 +514,9 @@ def apply_appearance(ids, look, distractor_colours):
 def replay(rng, params):
     """Draw what a scene draws, in the same order as main(), without the sim."""
     layout = sample_layout(rng, params)
+    held = sample_held(rng, params, layout)
     sample_appearance(rng, params)
-    sample_arm(rng, params, layout)
+    sample_arm(rng, params, layout, held)
     sample_camera(rng, params)
 
 
@@ -506,6 +552,9 @@ def main():
         for i, (_, parts) in enumerate(DISTRACTORS):
             if sim.pose(f'distractor{i}') is None:
                 spawn(f'distractor{i}', distractor_sdf(f'distractor{i}', parts, 20 + i))
+        for i, bottle in enumerate(OBJECTS):
+            if sim.pose(f'held_{bottle}') is None:
+                spawn(f'held_{bottle}', held_sdf(bottle, i + 1))
         if sim.pose('vlm_camera') is None:
             spawn('vlm_camera', camera_sdf(), z=2.0)
         sim.spin(2.0)
@@ -521,23 +570,38 @@ def main():
             # Clear the table first, so bottles are never teleported into the arm.
             sim.move_arm(HOME, seconds=1.0, wait=2.0)
             layout = sample_layout(rng, params)
+            held = sample_held(rng, params, layout)
             for i, name in enumerate(names):
                 place(model_name(name), layout.get(name), 10 + i)
+            for i, bottle in enumerate(OBJECTS):
+                set_pose(f'held_{bottle}', 20 + i, 10, HIDDEN_Z)
             look, distractor_colours = sample_appearance(rng, params)
             apply_appearance(ids, look, distractor_colours)
             sim.spin(0.5)
-            arm_kind, arm_target, joints = sample_arm(rng, params, layout)
+            arm_kind, arm_target, joints = sample_arm(rng, params, layout, held)
+            sim.grip(GRIP_CLOSED if held else GRIP_OPEN)
             arm_ok = sim.move_arm(joints)
+            if held:
+                sim.spin(1.0)  # the twin can still be settling; 0.3s read it mid-move
+                wx, wy, wz = sim.pose('wrist_3_link')['xyz']  # relative to the table's corner
+                if wz < HOLD_DROP + 0.05:
+                    # The twin stuck short (pressed on the table or a bottle): a bottle
+                    # hung from there would sit inside the table. Leave it out instead.
+                    held, arm_kind, arm_target = None, 'over_table', None
+                else:
+                    set_pose(f'held_{held}', wx, wy, TABLE_Z + wz - HOLD_DROP, (0.0, 0.0, joints[0]))
             family, eye, rpy = sample_camera(rng, params)
             set_pose('vlm_camera', *eye, rpy)
             sim.spin(1.5)  # physics settles, the camera re-renders
             rgb, labels = sim.frame()
             objects = settled_objects(sim, {k: model_name(k) for k in names if k in layout})
+            if held:
+                objects[held] = {'on_table': False, 'in_gripper': True}
             for name, spot in layout.items():
                 if 'kind' in spot:
                     objects[name]['kind'] = spot['kind']
             save(scene_dir, rgb, labels, {
-                'in_gripper': None, 'objects': objects,
+                'in_gripper': held, 'objects': objects,
                 'arm': {'kind': arm_kind, 'target': arm_target, 'reached': arm_ok, **arm_state(sim),
                         'commanded': [round(q, 3) for q in joints]}})
             (scene_dir / 'scene.json').write_text(json.dumps({
