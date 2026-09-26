@@ -39,3 +39,11 @@ def test_sim_prompt_cola_is_never_on_the_real_bar():
 
 def test_unusable_answer_scores_none():
     assert score('I see bottles', PHOTO, 'real') is None
+
+
+def test_pixel_boxes_are_scaled_to_1000_before_the_ballantines_check():
+    x0, y0, x1, y1 = TRUTH[PHOTO]['ballantines']
+    size = (1600, 1204)
+    pixels = [x0 * 1.6, y0 * 1.204, x1 * 1.6, y1 * 1.204]
+    assert score(_real(whiskey=pixels), PHOTO, 'real')['ballantines_as'] == []
+    assert score(_real(whiskey=pixels), PHOTO, 'real', size)['ballantines_as'] == ['whiskey']

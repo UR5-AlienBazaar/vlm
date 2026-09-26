@@ -3,7 +3,7 @@
 
     python real_photos.py run --model Qwen/Qwen3-VL-8B-Instruct --prompt real --photos photos --out outputs/real
     python real_photos.py run --model outputs/sft-r1/merged --name sft-r1 --prompt sim-train ...
-    python real_photos.py report outputs/real
+    python real_photos.py report outputs/real --photos photos
 
 `real` is prelabel_real's six-drink prompt; `sim` is the whiskey / cola / beer
 scene-checker prompt (`sim-train`: the one a fine-tuned model was trained on).
@@ -48,11 +48,18 @@ TRUTH = {
 }
 BALLANTINES_IOU = 0.5
 MAX_SIDE = 1600
+# These answer bboxes in pixels of the image they were sent, not 0-1000.
+PIXEL_BOX_MODELS = ('Qwen2.5-VL',)
+
+
+def sent_image(path):
+    image = ImageOps.exif_transpose(Image.open(path)).convert('RGB')
+    image.thumbnail((MAX_SIDE, MAX_SIDE))
+    return image
 
 
 def photo_part(path):
-    image = ImageOps.exif_transpose(Image.open(path)).convert('RGB')
-    image.thumbnail((MAX_SIDE, MAX_SIDE))
+    image = sent_image(path)
     buf = io.BytesIO()
     image.save(buf, format='JPEG', quality=90)
     return {'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()}}
@@ -69,12 +76,22 @@ def claims(answer, vocab):
     return {n: box for n, (visible, _, box) in scene['bottles'].items() if visible and n in VOCAB['sim']}
 
 
-def score(answer, photo, vocab):
-    """Bottles wrongly claimed, bottles missed, and served names put on Ballantine's, for one photo."""
+def to_1000(box, size):
+    w, h = size
+    return [box[0] * 1000 / w, box[1] * 1000 / h, box[2] * 1000 / w, box[3] * 1000 / h]
+
+
+def score(answer, photo, vocab, pixel_size=None):
+    """Bottles wrongly claimed, bottles missed, and served names put on Ballantine's, for one photo.
+
+    `pixel_size` is the (width, height) sent, for a model that answers boxes in pixels.
+    """
     truth = TRUTH[photo]
     said = claims(answer, vocab)
     if said is None:
         return None
+    if pixel_size:
+        said = {n: box and to_1000(box, pixel_size) for n, box in said.items()}
     absent = set(VOCAB[vocab]) - truth['present'] - truth['unsure']
     return {'wrong': sorted(set(said) & absent),
             'missed': sorted((truth['present'] & set(VOCAB[vocab])) - set(said)),
@@ -98,14 +115,17 @@ def run(opts):
          'rows': [{'photo': p.name, 'answer': o.outputs[0].text} for p, o in zip(photos, outputs)]}, indent=1))
 
 
-def report(out):
+def report(out, photos):
     lines = ['| model | prompt | bottles wrongly claimed | missed | Ballantine\'s taken as | unusable |',
              '|---|---|---|---|---|---|']
     ranked = []
     for path in sorted(Path(out).glob('*.*.json')):
         r = json.loads(path.read_text())
         vocab = path.name.rsplit('.', 2)[1]
-        scores = [score(row['answer'], row['photo'], vocab) for row in r['rows']]
+        pixels = any(m in r['model'] for m in PIXEL_BOX_MODELS)
+        scores = [score(row['answer'], row['photo'], vocab,
+                        sent_image(Path(photos) / row['photo']).size if pixels else None)
+                  for row in r['rows']]
         valid = [s for s in scores if s]
         wrong = Counter(n for s in valid for n in s['wrong'])
         missed = sum(len(s['missed']) for s in valid)
@@ -132,8 +152,9 @@ def main():
     p.add_argument('--gpu-memory', type=float, default=0.6)
     p = sub.add_parser('report')
     p.add_argument('out')
+    p.add_argument('--photos', required=True, help='to size pixel boxes (PIXEL_BOX_MODELS)')
     opts = parser.parse_args()
-    run(opts) if opts.cmd == 'run' else report(opts.out)
+    run(opts) if opts.cmd == 'run' else report(opts.out, opts.photos)
 
 
 if __name__ == '__main__':
