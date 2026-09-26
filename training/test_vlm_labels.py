@@ -117,3 +117,9 @@ def test_pour_stride_thins_pour_frames_only(tmp_path):
     counts = export(raw, tmp_path / 'out', pour_stride=2)
 
     assert counts['train'] + counts['val'] == 2 + 4
+
+
+def test_any_label_in_20_to_29_is_a_distractor():
+    labels = _scene()
+    labels[10:60, 41:60] = 23
+    assert scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']['value']
