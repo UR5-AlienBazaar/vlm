@@ -65,6 +65,13 @@ def test_gold_answer_scores_full_marks_and_garbage_scores_zero(tmp_path):
     assert score('I see some bottles', truth)['total'] == 0.0
 
 
+def test_a_bare_string_action_is_read(tmp_path):
+    truth = scene_truth(make_scene(tmp_path))
+    answer = gold_answer(truth)
+    answer['next_action'] = truth['next_action']['action']
+    assert score(json.dumps(answer), truth)['action'] == 1.0
+
+
 def test_wrong_action_and_missed_fall_cost_points(tmp_path):
     truth = scene_truth(make_scene(tmp_path))
     answer = gold_answer(truth)
