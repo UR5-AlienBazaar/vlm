@@ -12,6 +12,7 @@ Image paths in the JSONL are relative to <raw>, so training needs <raw> as its i
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -35,9 +36,14 @@ DISTRACTOR_IDS = range(20, 30)
 # i.e. most of it hidden. Wrist and stand views are larger, so this only gets
 # more lenient there. Estimated from geometry; re-measure on captured frames.
 MIN_VISIBLE_PX = 40
-# Obstruction = the distractor's box overlaps a target's box grown by this
-# fraction, i.e. it stands in front of or right against what the arm reaches for.
-OBSTRUCTION_MARGIN = 0.10
+# Arm A's base (bartender_gazebo sim.launch.py spawns it here) and the stand
+# centres capture_vlm_frames.py puts bottles on, in world metres: the straight
+# reaches the obstruction label is judged along.
+ARM_A_BASE = (-0.45, -0.40)
+STANDS = {'whiskey': (0.08, -0.30), 'cola': (0.08, -0.15)}
+# A distractor centre this close to a reach is in the gripper's way: the 6cm
+# box's half-diagonal plus the open fingers' clearance, as workcell.BLOCK_RADIUS.
+BLOCK_RADIUS = 0.07
 VAL_PERCENT = 10
 
 PROMPT = ('Describe the bar scene as JSON with keys bottles (name, visible, confidence, bbox), '
@@ -68,11 +74,26 @@ def iou_boxes(a, b):
     return inter / union if union > 0 else 0.0
 
 
-def _overlaps(a, b, margin):
-    grow_x = (b[2] - b[0]) * margin
-    grow_y = (b[3] - b[1]) * margin
-    return (a[0] < b[2] + grow_x and a[2] > b[0] - grow_x and
-            a[1] < b[3] + grow_y and a[3] > b[1] - grow_y)
+def _segment_distance(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    t = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy or 1.0)))
+    return math.dist(p, (a[0] + t * dx, a[1] + t * dy))
+
+
+def blocked(params):
+    """Whether the scene's distractor stands on arm A's straight reach to a shown bottle or the glass.
+
+    Judged from sim positions (scene.json params), not pixels, so all cameras of
+    a moment agree, including one that cannot see the distractor. A 2D box
+    overlap flipped with the viewpoint, which no model can learn.
+    """
+    distractor = params.get('distractor')
+    if not distractor:
+        return False
+    targets = [STANDS[b] for b in params.get('shown', []) if b in STANDS]
+    if params.get('glass'):
+        targets.append(params['glass'])
+    return any(_segment_distance(distractor, ARM_A_BASE, t) < BLOCK_RADIUS for t in targets)
 
 
 def visibility_confidence(px):
@@ -96,17 +117,16 @@ def _objects(labels, names):
     return objects
 
 
-def scene_label(labels, bottles, glasses, in_gripper):
+def scene_label(labels, bottles, glasses, in_gripper, obstruction):
     """The JSON answer the VLM is trained to give for one frame.
 
-    in_gripper comes from the simulator's state, not the image: the model learns
-    to see it, but a bottle hidden in the fingers is still labelled as held.
-    Both flags are sim state, so their confidence is 1.0.
+    in_gripper and obstruction (`blocked`) come from the simulator's state, not
+    the image: the model learns to see them, but a bottle hidden in the fingers
+    is still labelled as held. Both flags are sim state, so their confidence is
+    1.0; where the picture cannot show them, GRPO's Brier term teaches the model
+    to be unsure.
     """
     objects = {'bottles': _objects(labels, bottles), 'glasses': _objects(labels, glasses)}
-    targets = [o['bbox'] for group in objects.values() for o in group if o['bbox']]
-    obstruction = any(_overlaps(d, t, OBSTRUCTION_MARGIN)
-                      for d in distractor_boxes(labels) for t in targets)
     return {
         **objects,
         'in_gripper': {'value': in_gripper, 'confidence': 1.0},
@@ -150,7 +170,8 @@ def export(raw, out, pour_stride=1):
     out.mkdir(parents=True, exist_ok=True)
     counts = {'train': 0, 'val': 0}
     with open(out / 'train.jsonl', 'w') as train, open(out / 'val.jsonl', 'w') as val:
-        for scene in sorted(p for p in raw.iterdir() if p.is_dir()):
+        # scene.json is written last, so a scene still being captured is skipped.
+        for scene in sorted(p for p in raw.iterdir() if (p / 'scene.json').exists()):
             meta = json.loads((scene / 'scene.json').read_text())
             stride = pour_stride if meta.get('kind') == 'pour' else 1
             split = 'val' if is_val(scene.name) else 'train'
@@ -161,7 +182,8 @@ def export(raw, out, pour_stride=1):
                 in_gripper = json.loads((scene / f'{frame}.json').read_text())['in_gripper']
                 labels = np.asarray(Image.open(labels_png))
                 rgb = labels_png.with_name(labels_png.name.replace('_labels', '_rgb'))
-                label = scene_label(labels, meta['bottles'], meta['glasses'], in_gripper)
+                label = scene_label(labels, meta['bottles'], meta['glasses'], in_gripper,
+                                    blocked(meta.get('params') or {}))
                 record = chat_record(rgb.relative_to(raw).as_posix(), label)
                 record.update(bucket=bucket(meta, label, labels), camera=camera)
                 (val if split == 'val' else train).write(json.dumps(record) + '\n')

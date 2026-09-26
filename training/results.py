@@ -91,7 +91,7 @@ def ingest(con, raw, pour_stride=1):
     import numpy as np
     from PIL import Image
 
-    from vlm_labels import bucket, is_val, scene_label
+    from vlm_labels import blocked, bucket, is_val, scene_label
 
     raw = Path(raw).resolve()
     seeds = set()
@@ -118,7 +118,8 @@ def ingest(con, raw, pour_stride=1):
                     continue
                 in_gripper = json.loads((scene / f'{frame}.json').read_text())['in_gripper']
                 labels = np.asarray(Image.open(labels_png))
-                label = scene_label(labels, meta['bottles'], meta['glasses'], in_gripper)
+                label = scene_label(labels, meta['bottles'], meta['glasses'], in_gripper,
+                                    blocked(meta.get('params') or {}))
                 rgb = labels_png.with_name(labels_png.name.replace('_labels', '_rgb'))
                 con.execute(
                     'INSERT OR REPLACE INTO states (scenario_id, frame, camera, image, split, bucket, label) '

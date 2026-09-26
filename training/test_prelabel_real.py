@@ -27,3 +27,8 @@ def test_answer_becomes_all_six_bottles_with_unknowns_dropped():
 
 def test_non_json_answer_is_none():
     assert canonical_label('I see some bottles.') is None
+
+
+def test_malformed_box_is_no_label_not_a_crash():
+    answer = json.dumps({'bottles': [], 'glasses': [{'name': 'glass', 'visible': True, 'bbox': [[1, 2], [3, 4]]}]})
+    assert canonical_label(answer) is None
