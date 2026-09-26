@@ -31,7 +31,7 @@ GLASS_HOME = (0.20, -0.55)
 # stand (0.25m away) and inside the overhead camera's view.
 GLASS_JITTER = 0.05
 DISTRACTOR_P = 0.30
-POUR_P = 0.40
+POUR_P = 0.40  # default for --pour-p
 # PourDrink feedback states "<phase>_<bottle>" in which that bottle is in the
 # gripper: from the lift off its stand until it is set back down. Taken from the
 # server's own state machine rather than guessed from finger angle and height,
@@ -226,6 +226,10 @@ def main():
     parser.add_argument('out', type=Path)
     parser.add_argument('--scenes', type=int, default=400)
     parser.add_argument('--seed', type=int, default=0)
+    # Pour scenes cost minutes against ~3s for a static one, and consecutive
+    # pour frames are near-duplicates, so a training capture wants this low.
+    parser.add_argument('--pour-p', type=float, default=POUR_P,
+                        help='fraction of scenes that run the scripted pour')
     opts = parser.parse_args()
     rng = random.Random(opts.seed)
     cap = Capture()
@@ -233,7 +237,7 @@ def main():
     for n in range(opts.scenes):
         scene_dir = opts.out / f's{opts.seed:02d}_{n:05d}'
         scene_dir.mkdir(parents=True, exist_ok=True)
-        pour = rng.random() < POUR_P
+        pour = rng.random() < opts.pour_p
         started = time.monotonic()
         bottles, log = pour_scene(cap, scene_dir) if pour else static_scene(cap, scene_dir, rng)
         frames = len(list(scene_dir.glob('*_overhead_rgb.png')))
