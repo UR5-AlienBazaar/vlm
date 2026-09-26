@@ -1,0 +1,50 @@
+# The drinks the workcell can make, for bartender_api's /drinks and /make.
+#
+#   ros2 run bartender_api server --points workcell     (reads this file too)
+#   curl -X POST http://127.0.0.1:8090/make -d '{"drink": "whiskey_cola"}'
+#
+# A drink is the list of pendant scripts (pipelines in workcell_points.yaml)
+# to run for it, in order, as one API call. It stops at the first script
+# that does not finish. A drink whose scripts are not all taught yet shows
+# as not ready in /drinks and is refused before anything moves, so this
+# menu can be written before the scripts exist.
+#
+# The scripts named here, per ingredient (teach each with `record NAME` on
+# the pendant; only grab_whiskey exists so far):
+#
+#   grab_<x>     pick the bottle up from its spot (what /pick runs)
+#   pour_<x>     pour it into the glass
+#   return_<x>   put it back on its spot
+#
+# Rename, reorder or add scripts freely: nothing but this file decides what a
+# drink runs. Edits take effect on the next request, no restart.
+# Keys are what the API takes (lowercase); `name` is for people.
+drinks:
+  whiskey_cola:
+    name: Whiskey & Cola
+    scripts: [grab_whiskey, pour_whiskey, return_whiskey,
+              grab_cola, pour_cola, return_cola]
+  whiskey_sprite:
+    name: Whiskey & Sprite
+    scripts: [grab_whiskey, pour_whiskey, return_whiskey,
+              grab_sprite, pour_sprite, return_sprite]
+  gin_sprite:
+    name: Gin & Sprite
+    scripts: [grab_gin, pour_gin, return_gin,
+              grab_sprite, pour_sprite, return_sprite]
+  gin_fanta:
+    name: Gin & Fanta
+    scripts: [grab_gin, pour_gin, return_gin,
+              grab_fanta, pour_fanta, return_fanta]
+  vodka_cola:
+    name: Vodka & Cola
+    scripts: [grab_vodka, pour_vodka, return_vodka,
+              grab_cola, pour_cola, return_cola]
+  vodka_sprite:
+    name: Vodka & Sprite
+    scripts: [grab_vodka, pour_vodka, return_vodka,
+              grab_sprite, pour_sprite, return_sprite]
+  vodka_fanta:
+    name: Vodka & Fanta
+    scripts: [grab_vodka, pour_vodka, return_vodka,
+              grab_fanta, pour_fanta, return_fanta]

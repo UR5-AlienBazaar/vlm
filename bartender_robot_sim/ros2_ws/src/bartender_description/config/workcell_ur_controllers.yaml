@@ -1,0 +1,140 @@
+# ros2_control controller_manager configuration for the REAL workcell robot:
+# one UR5e over Ethernet through ur_robot_driver, plus the Robotiq 2F-85.
+# Loaded by bartender_bringup/launch/workcell_real.launch.py.
+#
+# Based on ur_robot_driver 2.14's config/ur_controllers.yaml, with two
+# changes that matter:
+#
+#   - The arm's trajectory controller is called `ur_arm_controller`, not
+#     `scaled_joint_trajectory_controller`. It is the same type the driver
+#     uses (ScaledJointTrajectoryController, which slows down with the
+#     teach pendant's speed slider instead of losing track), but under the
+#     name the rest of this project already uses. So MoveIt's
+#     moveit_controllers.yaml, bartender_teach and the skills work against
+#     the real arm without a second set of names.
+#
+#   - It keeps the per-joint goal tolerances from controllers.yaml. The
+#     driver ships 0.1 rad, ten times looser; controllers.yaml explains why
+#     0.01 is the number and test_controller_limits.py holds it there.
+#
+# The driver's other controllers are kept only where its own nodes depend
+# on them: controller_stopper expects the broadcasters and
+# io_and_status_controller, and io_and_status_controller is what serves
+# ~/resend_robot_program and the payload/IO services.
+controller_manager:
+  ros__parameters:
+    update_rate: 500  # Hz, the UR5e's control rate
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    io_and_status_controller:
+      type: ur_controllers/GPIOController
+
+    speed_scaling_state_broadcaster:
+      type: ur_controllers/SpeedScalingStateBroadcaster
+
+    force_torque_sensor_broadcaster:
+      type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster
+
+    tcp_pose_broadcaster:
+      type: pose_broadcaster/PoseBroadcaster
+
+    ur_configuration_controller:
+      type: ur_controllers/URConfigurationController
+
+    ur_arm_controller:
+      type: ur_controllers/ScaledJointTrajectoryController
+
+    # Hand-guiding. Spawned inactive; switch to it (and away from
+    # ur_arm_controller) to push the arm around by hand while teaching.
+    freedrive_mode_controller:
+      type: ur_controllers/FreedriveModeController
+
+    gripper_controller:
+      type: position_controllers/GripperActionController
+
+speed_scaling_state_broadcaster:
+  ros__parameters:
+    state_publish_rate: 100.0
+    tf_prefix: ""
+
+io_and_status_controller:
+  ros__parameters:
+    tf_prefix: ""
+
+ur_configuration_controller:
+  ros__parameters:
+    tf_prefix: ""
+
+freedrive_mode_controller:
+  ros__parameters:
+    tf_prefix: ""
+
+force_torque_sensor_broadcaster:
+  ros__parameters:
+    sensor_name: tcp_fts_sensor
+    state_interface_names:
+      - force.x
+      - force.y
+      - force.z
+      - torque.x
+      - torque.y
+      - torque.z
+    frame_id: tool0_controller
+    topic_name: ft_data
+
+tcp_pose_broadcaster:
+  ros__parameters:
+    frame_id: base
+    pose_name: tcp_pose
+    tf:
+      child_frame_id: tool0_controller
+
+ur_arm_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    speed_scaling_interface_name: speed_scaling/speed_scaling_factor
+    update_rate: 500
+    constraints:
+      stopped_velocity_tolerance: 0.05
+      goal_time: 0.5
+      # See controllers.yaml's ur_arm_controller for why 0.01 and why there
+      # is no `trajectory:` tolerance.
+      shoulder_pan_joint:
+        goal: 0.01
+      shoulder_lift_joint:
+        goal: 0.01
+      elbow_joint:
+        goal: 0.01
+      wrist_1_joint:
+        goal: 0.01
+      wrist_2_joint:
+        goal: 0.01
+      wrist_3_joint:
+        goal: 0.01
+
+# Mocked unless the launch is given gripper_fake_hardware:=false; see
+# workcell.urdf.xacro. Same settings as in sim either way.
+gripper_controller:
+  ros__parameters:
+    joint: robotiq_85_left_knuckle_joint
+    action_monitor_rate: 20.0
+    goal_tolerance: 0.01
+    allow_stalling: true
+    # controllers.yaml explains this number; it is not a typo.
+    stall_timeout: 3600.0

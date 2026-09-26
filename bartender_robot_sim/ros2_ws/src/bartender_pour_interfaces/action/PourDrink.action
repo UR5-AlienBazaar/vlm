@@ -1,0 +1,17 @@
+# Request: which bottle/glass (by TF frame id / known scene object name)
+# and how much to pour. Phase 1 has exactly one bottle and one glass at
+# fixed, known poses -- bottle_id/glass_id exist now so the interface
+# doesn't need to change when perception and multiple bottles are added.
+string bottle_id
+string glass_id
+float32 pour_amount_ml
+---
+# Result
+bool success
+string message
+float32 estimated_poured_ml
+---
+# Feedback: coarse state machine progress, for later UI/voice layers to
+# narrate ("picking up the bottle", "pouring now", ...) without polling.
+string state
+float32 progress

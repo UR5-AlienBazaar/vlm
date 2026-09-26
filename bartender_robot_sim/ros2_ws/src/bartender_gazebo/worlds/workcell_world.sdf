@@ -1,0 +1,97 @@
+<?xml version="1.0" ?>
+<!--
+  The real workcell, for simulating it: a 1.40 x 0.70 table and one UR5e.
+
+  There is no table in this file. It is a link of the robot description
+  (bartender_description/urdf/workcell.urdf.xacro), so the same table is in
+  Gazebo, in MoveIt, and on the real robot where there is no Gazebo; see the
+  xacro's header for the layout and why. sim.launch.py spawns that
+  description with its `world` frame, the table's corner, at the top of the
+  table (0, 0, table_height).
+
+  Physics, plugins, light and ground are the bar world's, unchanged; its
+  comments say why they are what they are. Nothing stands on the table yet.
+-->
+<sdf version="1.9">
+  <world name="workcell_world">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <!-- Bullet rather than DART's default FCL narrowphase. This is the
+           single biggest lever on how long a pour takes, and it costs nothing
+           in fidelity.
+
+           Every link of the arm and gripper has a triangle-mesh collision.
+           Under FCL, the moment the gripper takes the bottle's weight the
+           real-time factor collapses from 1.0 to ~0.1, so trajectories that
+           are timed at 0.6-1.7s take 5-12s of wall clock. It is specifically
+           the loaded mesh contact: clamping on the bottle while it still rests
+           on the counter stays at RTF 1.0, and it recovers the instant the
+           bottle is released.
+
+           Measured over 4 pours each, same code, only this setting changed:
+             FCL     87.4 / 86.1 / 79.9 / 79.8 s
+             bullet  24.6 / 24.2 / 24.3 s
+           Both 4/4 with the bottle returned upright and within 8mm of its
+           station, so this buys ~3.4x for free.
+
+           Two things that did NOT work, for whoever tries next: halving the
+           step count (max_step_size 0.001 -> 0.002) changed the ratio not at
+           all, and raising the joint acceleration limits made the planned
+           trajectories shorter but the execution no faster - faster motion
+           just makes the contact solve harder by the same factor, and it
+           starts throwing the bottle. -->
+      <dart>
+        <collision_detector>bullet</collision_detector>
+      </dart>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.4 0.4 0.4 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

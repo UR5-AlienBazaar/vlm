@@ -1,0 +1,271 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="cola_bottle">
+    <!-- Link origin sits at the center of the bottle's base, same convention
+         as jack_daniels_bottle, so placing the model's pose z at table height
+         puts the bottle exactly on the surface. -->
+    <link name="cola_link">
+      <inertial>
+        <!-- A mostly-full bottle carries its mass low; the liquid in the mesh
+             tops out around z=0.227, so the centre of mass sits near 0.11.
+             bartender_pour grasps at 0.060 (the waist) rather than at the
+             centre of mass, so unlike the whiskey this one is not balanced in
+             the fingers - see the COLA notes in pour_action_server.py.
+
+             1.05kg: a refillable 500ml glass Coke bottle is ~550g of glass
+             (they are made thick to survive being washed and reused) plus
+             500g of contents. It was 0.8kg. Same reasoning as the whiskey -
+             see that file's inertial comment for why mass helps here and what
+             it does not do. Inertia is the solid-cylinder proxy (r 0.0336,
+             h 0.250) rescaled; recompute it alongside any mass change. -->
+        <pose>0 0 0.11 0 0 0</pose>
+        <mass>1.05</mass>
+        <inertia>
+          <ixx>0.005765</ixx>
+          <iyy>0.005765</iyy>
+          <izz>0.000593</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+
+      <!-- The cola spins on the counter and will not settle. Traced: after a
+           reset its yaw runs 72 to 141 degrees at a steady 2.3 deg/s with no
+           sign of decay, and its tilt creeps to 4.6 degrees with it. That is
+           enough to move the NECK 18mm sideways at grasp height, which is 30x
+           the pocket clearance the neck-hooking fingertip has, so the grasp
+           simply misses.
+
+           The whiskey does not do this because its base is a BOX and gets a
+           wide contact manifold; this base is a cylinder on a flat counter,
+           which gives a narrow one that barely resists spin. Damping is the
+           honest fix: a real bottle on a real bar does not rotate forever. -->
+      <velocity_decay>
+        <linear>0.05</linear>
+        <angular>0.30</angular>
+      </velocity_decay>
+
+      <visual name="cola_visual">
+        <!-- Source mesh is Y-up (Blender OBJ export), so rotate +90 deg about
+             X to stand it up in Z, and scale it: the supplied mesh is 3.8418
+             units tall, and 0.065074 makes that a 0.25m, 67.5mm-wide bottle,
+             which is a 500ml glass Coke bottle. -->
+        <pose>0 0 0 1.570796 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>meshes/cola_bottle.obj</uri>
+            <scale>0.065074 0.065074 0.065074</scale>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.06 0.02 0.01 1</ambient>
+          <diffuse>0.28 0.08 0.05 1</diffuse>
+          <specular>0.5 0.5 0.5 1</specular>
+          <emissive>0 0 0 1</emissive>
+        </material>
+      </visual>
+
+      <!-- Primitive collisions rather than the 52k-face visual mesh. Profiling
+           the mesh by height gives the classic contour-bottle shape:
+
+             z 0.000..0.040   base, 65-67mm
+             z 0.040..0.080   the WAIST, pinching to 57mm
+             z 0.080..0.150   upper bulge, back out to 67.5mm
+             z 0.150..0.195   shoulder, tapering 60mm -> 42mm
+             z 0.195..0.250   neck and cap, 29-33mm
+
+           The waist is modelled rather than smoothed away, and bartender_pour
+           grips there, because the contour is what makes this bottle holdable.
+           A uniform cylinder at the bottle's widest was tried first and the
+           grasp was unreliable in a way no clamp angle fixed: a smooth
+           cylinder between two flat pads needs ~6mm of pad penetration before
+           the joint stalls (the whiskey's flat faces stall in 0.2mm), and at
+           that depth the bottle rolls out sideways: traced, it spun 111
+           degrees and was flung off the counter. Squeezing less made it slip
+           on the lift instead.
+
+           Seated in the waist the pads have 13mm of clearance a side instead
+           of 9mm, and the 67mm sections above and below act as stops: the
+           bottle can shift about 6mm before a wider part runs into pads that
+           are closed to 59mm and cannot pass it. That is a geometric limit on
+           the slip rather than a frictional one. Round, so nothing here
+           depends on the bottle's yaw. -->
+      <collision name="cola_base_collision">
+        <pose>0 0 0.0200 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.0333</radius>
+            <length>0.040</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.9</mu>
+              <mu2>0.9</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <collision name="cola_waist_collision">
+        <pose>0 0 0.0600 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.0298</radius>
+            <length>0.040</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.9</mu>
+              <mu2>0.9</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <collision name="cola_bulge_collision">
+        <pose>0 0 0.1150 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.0336</radius>
+            <length>0.070</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.9</mu>
+              <mu2>0.9</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <collision name="cola_shoulder_collision">
+        <pose>0 0 0.1725 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.0250</radius>
+            <length>0.045</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.9</mu>
+              <mu2>0.9</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <collision name="cola_neck_collision">
+        <pose>0 0 0.2225 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.0165</radius>
+            <length>0.055</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.9</mu>
+              <mu2>0.9</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <!-- Collar ring, for picking the bottle up BY THE NECK. The fingertip
+           in ../../fingertip hooks its ledge under this, so the bottle hangs
+           on a mechanical ledge instead of on pad friction.
+
+           Real spirits bottles have this lip; the model did not, and without
+           it a neck hook cannot work at all: going up the bottle the
+           profile only ever narrowed, so there was nothing above the neck for
+           a ledge to catch. r 0.0195 against the 0.0165 neck gives a 3mm
+           radial overhang, which is what the ledge bears on. Sits just below
+           the mouth, leaving 5mm of lip above and the neck bare below. -->
+      <collision name="cola_collar_collision">
+        <pose>0 0 0.2410 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.0210</radius>
+            <length>0.008</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.9</mu>
+              <mu2>0.9</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <!-- ============ Speed pourer ============
+           A bar speed pourer (the tapered spout you hammer into a spirits
+           bottle) rather than pouring from the bare lip. It does two things
+           that matter here.
+
+           It makes the pour controlled instead of a glug: a bare mouth
+           alternates liquid and air and comes out in surges, which is why
+           real bars fit these.
+
+           And, more importantly for the robot, it moves the POUR POINT off
+           the bottle's axis. The bare mouth sat on the axis, so every pour
+           pose could be solved from the bottle's centreline. The spout tip
+           is 17.1mm to the side and 54mm further along, and that
+           point - not the mouth, not tool0 - is what has to be held over
+           the glass. That is what the tool frames in
+           bartender_teach/tool_frames.py exist to express: with the bottle
+           grasped, TIP is the tool centre point, and a tilt rotates ABOUT it
+           so it keeps its xyz while the bottle turns around it.
+
+           Tip in bottle-local coordinates: (0.0171, 0, 0.3040).
+           It leans toward local +X on purpose. The pour tilts the bottle
+           about base Y, which maps bottle-local +X onto base -Z at the pour
+           angle - so leaning that way is what points the spout DOWNWARD
+           when the bottle is tilted, instead of uselessly sideways.
+
+           Mass is left alone: a pourer is ~20g against a 1.05kg bottle,
+           which is inside the rounding on that figure, and it raises the
+           centre of mass by about 2mm. -->
+      <visual name="cola_pourer_body_visual">
+        <pose>0 0 0.2460 0 0 0</pose>
+        <geometry><cylinder><radius>0.0095</radius><length>0.022</length></cylinder></geometry>
+        <material>
+          <ambient>0.05 0.05 0.06 1</ambient>
+          <diffuse>0.22 0.23 0.26 1</diffuse>
+          <specular>0.7 0.7 0.7 1</specular>
+        </material>
+      </visual>
+      <visual name="cola_pourer_spout_visual">
+        <pose>0.0086 0 0.2805 0 0.349066 0</pose>
+        <geometry><cylinder><radius>0.005</radius><length>0.050</length></cylinder></geometry>
+        <material>
+          <ambient>0.05 0.05 0.06 1</ambient>
+          <diffuse>0.22 0.23 0.26 1</diffuse>
+          <specular>0.7 0.7 0.7 1</specular>
+        </material>
+      </visual>
+
+      <collision name="cola_pourer_body_collision">
+        <pose>0 0 0.2460 0 0 0</pose>
+        <geometry><cylinder><radius>0.0095</radius><length>0.022</length></cylinder></geometry>
+        <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+      </collision>
+      <collision name="cola_pourer_spout_collision">
+        <pose>0.0086 0 0.2805 0 0.349066 0</pose>
+        <geometry><cylinder><radius>0.005</radius><length>0.050</length></cylinder></geometry>
+        <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+      </collision>
+    </link>
+  </model>
+</sdf>

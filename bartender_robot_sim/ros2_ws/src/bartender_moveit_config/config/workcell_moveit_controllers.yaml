@@ -1,0 +1,30 @@
+# MoveIt's controller handles for the workcell's one arm. Arm A's half of
+# moveit_controllers.yaml: the same names serve both the sim
+# (workcell_controllers.yaml) and the real robot
+# (workcell_ur_controllers.yaml), which is why the real robot's scaled
+# trajectory controller is called ur_arm_controller there.
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - ur_arm_controller
+    - gripper_controller
+
+  ur_arm_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+  gripper_controller:
+    action_ns: gripper_cmd
+    type: GripperCommand
+    default: true
+    joints:
+      - robotiq_85_left_knuckle_joint

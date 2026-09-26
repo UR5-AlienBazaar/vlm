@@ -1,0 +1,47 @@
+# Augments/overrides the URDF's joint limits for MoveIt's time
+# parametrization. Values copied from ros-humble-ur-moveit-config's
+# joint_limits.yaml (same arm, same joint names).
+#
+# Both arms, listed separately because these are keyed by JOINT name and arm
+# B's are all prefixed. Same arm, same limits; arm B is not slowed down
+# here even though it does the pushing, because the limits it would need to
+# respect while pushing are force limits and this file cannot express them.
+# What keeps that push bounded is the travel bartender_open commands, not an
+# acceleration cap.
+joint_limits:
+  shoulder_pan_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  shoulder_lift_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  elbow_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_1_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_2_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_3_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  b_shoulder_pan_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  b_shoulder_lift_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  b_elbow_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  b_wrist_1_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  b_wrist_2_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  b_wrist_3_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0

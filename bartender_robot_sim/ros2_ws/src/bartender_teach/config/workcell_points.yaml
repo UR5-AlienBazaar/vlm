@@ -1,0 +1,334 @@
+# Robot points taught with `ros2 run bartender_teach teach`.
+#
+# Angles are RADIANS. `joints` is a mapping so that joint order can never be
+# lost; `pose` is the forward kinematics at the moment the point was recorded
+# and is informational only -- nothing replays it, so editing it does nothing.
+#
+# Safe to hand-edit. The tool rewrites this file wholesale on save, so
+# comments added below this header will not survive a save from the tool.
+frame: base_link
+group: ur_manipulator
+eef_link: tool0
+points:
+  approach_grab_gin:
+    joints:
+      elbow_joint: 1.164757
+      shoulder_lift_joint: -0.767966
+      shoulder_pan_joint: 1.418549
+      wrist_1_joint: -0.397103
+      wrist_2_joint: -0.148768
+      wrist_3_joint: 1.58611
+    recorded: '2026-09-25T20:36:22'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.130129
+      - 0.680315
+      - 0.206462
+      quat_xyzw:
+      - 0.006535
+      - 0.707093
+      - -0.004075
+      - -0.707079
+    gripper: 0.7929
+    tool: tool0
+    note: 'Not taught: aproach_grab_whiskey moved 255 mm along tool +y (computed offline, UR5e nominal
+      kinematics).'
+  approach_grab_vodka:
+    joints:
+      elbow_joint: 1.637122
+      shoulder_lift_joint: -1.039148
+      shoulder_pan_joint: 1.384357
+      wrist_1_joint: -0.598228
+      wrist_2_joint: -0.18296
+      wrist_3_joint: 1.586052
+    recorded: '2026-09-25T20:36:22'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.130564
+      - 0.555329
+      - 0.208337
+      quat_xyzw:
+      - 0.006535
+      - 0.707093
+      - -0.004075
+      - -0.707079
+    gripper: 0.7929
+    tool: tool0
+    note: 'Not taught: aproach_grab_whiskey moved 130 mm along tool +y (computed offline, UR5e nominal
+      kinematics).'
+  aproach_grab_whiskey:
+    joints:
+      elbow_joint: 2.0337
+      shoulder_lift_joint: -1.301497
+      shoulder_pan_joint: 1.32645
+      wrist_1_joint: -0.732397
+      wrist_2_joint: -0.240867
+      wrist_3_joint: 1.58599
+    recorded: '2026-09-25T18:43:59'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.131016
+      - 0.425345
+      - 0.210288
+      quat_xyzw:
+      - -0.006535
+      - -0.707093
+      - 0.004075
+      - 0.707079
+    gripper: 0.7929
+    tool: tool0
+  away_up_gin:
+    joints:
+      elbow_joint: 0.930741
+      shoulder_lift_joint: -0.852665
+      shoulder_pan_joint: 1.357326
+      wrist_1_joint: -0.075623
+      wrist_2_joint: -0.21192
+      wrist_3_joint: 1.588809
+    recorded: '2026-09-25T20:36:22'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.087848
+      - 0.683579
+      - 0.352302
+      quat_xyzw:
+      - -0.007763
+      - -0.706882
+      - 0.006669
+      - 0.707258
+    gripper: 0.7929
+    tool: tool0
+    note: 'Not taught: away_up_whiskey moved 255 mm along tool +y (computed offline, UR5e nominal kinematics).'
+  away_up_vodka:
+    joints:
+      elbow_joint: 1.434587
+      shoulder_lift_joint: -1.175974
+      shoulder_pan_joint: 1.309129
+      wrist_1_joint: -0.256607
+      wrist_2_joint: -0.260116
+      wrist_3_joint: 1.589268
+    recorded: '2026-09-25T20:36:22'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.08804
+      - 0.558605
+      - 0.354853
+      quat_xyzw:
+      - -0.007763
+      - -0.706882
+      - 0.006669
+      - 0.707258
+    gripper: 0.7929
+    tool: tool0
+    note: 'Not taught: away_up_whiskey moved 130 mm along tool +y (computed offline, UR5e nominal kinematics).'
+  away_up_whiskey:
+    joints:
+      elbow_joint: 1.817914
+      shoulder_lift_joint: -1.483498
+      shoulder_pan_joint: 1.228055
+      wrist_1_joint: -0.332874
+      wrist_2_joint: -0.34119
+      wrist_3_joint: 1.589754
+    recorded: '2026-09-25T18:46:34'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.08824
+      - 0.428633
+      - 0.357506
+      quat_xyzw:
+      - -0.007762
+      - -0.706882
+      - 0.006669
+      - 0.707258
+    gripper: 0.7929
+    tool: tool0
+  grab_gin:
+    joints:
+      elbow_joint: 1.126286
+      shoulder_lift_joint: -0.747056
+      shoulder_pan_joint: 1.537505
+      wrist_1_joint: -0.37988
+      wrist_2_joint: -0.029669
+      wrist_3_joint: 1.586599
+    recorded: '2026-09-25T20:36:22'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.210317
+      - 0.680641
+      - 0.206383
+      quat_xyzw:
+      - -0.006638
+      - -0.707082
+      - 0.004076
+      - 0.707088
+    gripper: 0.7929
+    tool: tool0
+    note: 'Not taught: grab_whiskey moved 255 mm along tool +y (computed offline, UR5e nominal kinematics).'
+  grab_vodka:
+    joints:
+      elbow_joint: 1.601987
+      shoulder_lift_joint: -1.018037
+      shoulder_pan_joint: 1.530774
+      wrist_1_joint: -0.584481
+      wrist_2_joint: -0.0364
+      wrist_3_joint: 1.586478
+    recorded: '2026-09-25T20:36:22'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.21077
+      - 0.555657
+      - 0.208277
+      quat_xyzw:
+      - -0.006638
+      - -0.707082
+      - 0.004076
+      - 0.707088
+    gripper: 0.7929
+    tool: tool0
+    note: 'Not taught: grab_whiskey moved 130 mm along tool +y (computed offline, UR5e nominal kinematics).'
+  grab_whiskey:
+    joints:
+      elbow_joint: 1.994803
+      shoulder_lift_joint: -1.273709
+      shoulder_pan_joint: 1.519505
+      wrist_1_joint: -0.721499
+      wrist_2_joint: -0.047669
+      wrist_3_joint: 1.586353
+    recorded: '2026-09-25T18:43:18'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.211241
+      - 0.425672
+      - 0.210247
+      quat_xyzw:
+      - -0.006638
+      - -0.707082
+      - 0.004076
+      - 0.707088
+    gripper: 0.7929
+    tool: tool0
+  home:
+    joints:
+      elbow_joint: 0.0
+      shoulder_lift_joint: -1.57
+      shoulder_pan_joint: 0.0
+      wrist_1_joint: -1.57
+      wrist_2_joint: 0.0
+      wrist_3_joint: 0.0
+    recorded: '2026-09-25T18:34:46'
+    group: ur_manipulator
+    note: 'Not taught: the workcell SRDF''s `home` state. The arm straight up, clear of the table and
+      every bottle; where each pick starts and ends.'
+  up_gin:
+    joints:
+      elbow_joint: 0.879489
+      shoulder_lift_joint: -0.822972
+      shoulder_pan_joint: 1.535611
+      wrist_1_joint: -0.040282
+      wrist_2_joint: -0.033837
+      wrist_3_joint: 1.575092
+    recorded: '2026-09-25T20:36:22'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.208933
+      - 0.683378
+      - 0.352311
+      quat_xyzw:
+      - -0.007731
+      - -0.70687
+      - 0.006779
+      - 0.707268
+    gripper: 0.7929
+    tool: tool0
+    note: 'Not taught: up_whsikey moved 255 mm along tool +y (computed offline, UR5e nominal kinematics).'
+  up_vodka:
+    joints:
+      elbow_joint: 1.395394
+      shoulder_lift_joint: -1.14886
+      shoulder_pan_joint: 1.527972
+      wrist_1_joint: -0.233288
+      wrist_2_joint: -0.041476
+      wrist_3_joint: 1.578083
+    recorded: '2026-09-25T20:36:22'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.2091
+      - 0.558405
+      - 0.354876
+      quat_xyzw:
+      - -0.007731
+      - -0.70687
+      - 0.006779
+      - 0.707268
+    gripper: 0.7929
+    tool: tool0
+    note: 'Not taught: up_whsikey moved 130 mm along tool +y (computed offline, UR5e nominal kinematics).'
+  up_whsikey:
+    joints:
+      elbow_joint: 1.779454
+      shoulder_lift_joint: -1.449213
+      shoulder_pan_joint: 1.515211
+      wrist_1_joint: -0.320109
+      wrist_2_joint: -0.054236
+      wrist_3_joint: 1.581201
+    recorded: '2026-09-25T18:45:01'
+    group: ur_manipulator
+    pose:
+      xyz:
+      - -0.209275
+      - 0.428432
+      - 0.357543
+      quat_xyzw:
+      - -0.007731
+      - -0.70687
+      - 0.006779
+      - 0.707268
+    gripper: 0.7929
+    tool: tool0
+pipelines:
+  grab_gin:
+    steps:
+    - goto: approach_grab_gin
+    - grip: 0.02
+      arm: a
+    - goto: grab_gin
+    - grip: 0.5
+      arm: a
+    - goto: up_gin
+    - goto: away_up_gin
+    recorded: '2026-09-25T20:36:22'
+    note: grab_whiskey shifted 255 mm along tool +y
+  grab_vodka:
+    steps:
+    - goto: approach_grab_vodka
+    - grip: 0.02
+      arm: a
+    - goto: grab_vodka
+    - grip: 0.5
+      arm: a
+    - goto: up_vodka
+    - goto: away_up_vodka
+    recorded: '2026-09-25T20:36:22'
+    note: grab_whiskey shifted 130 mm along tool +y
+  grab_whiskey:
+    steps:
+    - goto: aproach_grab_whiskey
+    - grip: 0.02
+      arm: a
+    - goto: grab_whiskey
+    - grip: 0.5
+      arm: a
+    - goto: up_whsikey
+    - goto: away_up_whiskey
+    recorded: '2026-09-25T18:51:09'

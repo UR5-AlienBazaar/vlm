@@ -1,0 +1,33 @@
+# ros2_control configuration for the workcell's Gazebo TWIN: the simulated
+# arm that copies the real one (bartender_bringup/launch/workcell_twin.launch.py).
+#
+# The twin plans nothing and takes no goals. twin_mirror streams the real
+# robot's /joint_states into twin_position_controller, and the Gazebo arm
+# goes where the real arm is. So there is no trajectory controller here and
+# no gripper action: something that could be sent a goal of its own is
+# something that could make the twin disagree with the robot it shows.
+#
+# It runs under the /twin namespace, next to the real robot's controllers,
+# hence the /** keys: they match the nodes wherever they are pushed.
+/**/controller_manager:
+  ros__parameters:
+    update_rate: 500  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    twin_position_controller:
+      type: position_controllers/JointGroupPositionController
+
+/**/twin_position_controller:
+  ros__parameters:
+    # Arm and gripper knuckle in one command, so a twin frame is one
+    # message and the gripper cannot lag the arm by a message.
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+      - robotiq_85_left_knuckle_joint

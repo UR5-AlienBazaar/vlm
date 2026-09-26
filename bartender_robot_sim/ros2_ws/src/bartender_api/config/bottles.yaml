@@ -1,0 +1,18 @@
+# Bottles the bar stocks. A label reading only picks one of these rows;
+# brand, type and volume in /world come from here, not from the reading.
+# type must be one word Gemini can choose (it is offered as a fixed list).
+# aliases: other spellings the label may show, including non-Latin script.
+bottles:
+  - brand: Jack Daniel's
+    type: whiskey
+    volume_ml: 700
+  # Volume as Gemini read it from phone photos, not checked against the bottle.
+  - brand: Żubrówka
+    type: vodka
+    volume_ml: 500
+    aliases: [Zubrowka]
+  # Volume not read from phone photos yet; 700 ml is the EU size, check the bottle.
+  - brand: Tenjaku
+    type: gin
+    volume_ml: 700
+    aliases: [天雀]

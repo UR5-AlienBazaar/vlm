@@ -1,0 +1,55 @@
+# Maps MoveIt's four controller handles onto the ros2_control controllers in
+# bartender_description/config/controllers.yaml. Joint lists must match that
+# file exactly: MoveIt picks a controller for a trajectory by looking for one
+# whose joint set covers the trajectory's joints, so a mismatch shows up as
+# "Unable to identify any set of controllers" rather than as a bad move.
+#
+# `default: true` on all four is right even though there are two arms: it is
+# per-joint-set, not global, and no two of these four controllers claim the
+# same joint.
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - ur_arm_controller
+    - gripper_controller
+    - b_ur_arm_controller
+    - b_gripper_controller
+
+  ur_arm_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+  gripper_controller:
+    action_ns: gripper_cmd
+    type: GripperCommand
+    default: true
+    joints:
+      - robotiq_85_left_knuckle_joint
+
+  b_ur_arm_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - b_shoulder_pan_joint
+      - b_shoulder_lift_joint
+      - b_elbow_joint
+      - b_wrist_1_joint
+      - b_wrist_2_joint
+      - b_wrist_3_joint
+
+  b_gripper_controller:
+    action_ns: gripper_cmd
+    type: GripperCommand
+    default: true
+    joints:
+      - b_robotiq_85_left_knuckle_joint

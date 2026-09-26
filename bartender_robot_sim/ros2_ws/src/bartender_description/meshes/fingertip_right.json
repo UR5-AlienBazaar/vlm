@@ -1,0 +1,15 @@
+{
+  "body_w": 46.0,
+  "body_h": 34.0,
+  "body_t": 16.0,
+  "mount_plate_t": 3.0,
+  "front_x": 19.0,
+  "neck_d": 33.0,
+  "collar_d": 42.0,
+  "pocket_r": 17.1,
+  "pocket_arc": 120.0,
+  "axis_x": 27.550000000000004,
+  "ledge_z": 16.0,
+  "ledge_bearing_width": 3.8999999999999986,
+  "opening_with_tips": 47.0
+}
