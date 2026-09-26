@@ -3,7 +3,8 @@ import random
 
 from capture_workcell_scenes import (ARM_BASE, BEER_CAP_HEIGHT, FOREARM, MIN_GAP, OBJECTS, PLACE_X, PLACE_Y,
                                      REACH_FUDGE, SCENE_PARAMS, SHOULDER_Z, UPPER_ARM, WRIST_DROP, arm_ik,
-                                     cap_xyz, look_at, sample_appearance, sample_arm, sample_layout)
+                                     cap_xyz, held_sdf, look_at, sample_appearance, sample_arm,
+                                     sample_held, sample_layout)
 
 
 def test_look_at_points_down_at_the_target():
@@ -79,3 +80,17 @@ def test_over_table_always_finds_a_reachable_pose():
     for _ in range(2000):
         kind, _, joints = sample_arm(rng, params, {})
         assert kind == 'over_table' and len(joints) == 6
+def test_held_bottle_leaves_the_table_and_the_arm_takes_it():
+    params = {**SCENE_PARAMS, 'bottle_p': 1.0, 'fallen_p': 0.0, 'held_p': 1.0}
+    rng = random.Random(5)
+    layout = sample_layout(rng, params)
+    held = sample_held(rng, params, layout)
+    assert held in OBJECTS and held not in layout
+    assert sample_arm(rng, params, layout, held)[:2] == ('holding', held)
+
+
+def test_held_copy_is_a_static_labelled_visual():
+    sdf = held_sdf('beer', 3)
+    assert '<model name="held_beer"><static>true</static>' in sdf
+    assert '<collision' not in sdf and 'detachable-joint' not in sdf
+    assert '<label>3</label>' in sdf and '<uri>model://beer_bottle/meshes/' in sdf
