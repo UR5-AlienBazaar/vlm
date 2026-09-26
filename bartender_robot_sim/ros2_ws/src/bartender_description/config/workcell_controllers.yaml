@@ -1,0 +1,108 @@
+# ros2_control controller_manager configuration for the workcell in Gazebo
+# Sim: ONE UR5e + Robotiq 2F-85 (bartender_description/urdf/workcell.urdf.xacro).
+#
+# Arm A's controllers from controllers.yaml, unchanged, minus arm B's. Same
+# names as on the bar, so MoveIt, bartender_teach and the skills address
+# this arm exactly as they address arm A there. The real robot's equivalent
+# is workcell_ur_controllers.yaml.
+controller_manager:
+  ros__parameters:
+    update_rate: 500  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    ur_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    gripper_controller:
+      type: position_controllers/GripperActionController
+
+ur_arm_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    constraints:
+      stopped_velocity_tolerance: 0.05
+      goal_time: 0.5
+      # PER-JOINT GOAL TOLERANCE. Without these the controller reports
+      # SUCCEEDED wherever it happens to stop, and every layer above
+      # inherits a success that means nothing.
+      #
+      # joint_trajectory_controller defaults each per-joint tolerance to
+      # 0.0, and 0.0 means NOT CHECKED rather than "must be exact". So with
+      # only the two settings above, the goal check passed trivially.
+      # Measured, driving arm A's wrist 250mm into the bar top: the
+      # controller returned SUCCEEDED, error_code 0, with wrist_1 0.756 rad
+      # (43 degrees) from its goal and shoulder_lift 0.572 off. The same
+      # defect at the skill level put a flange 267mm from where it was sent
+      # after MoveIt had computed the path at 100% and the controller had
+      # said "Goal reached, success!".
+      #
+      # 0.01 rad is chosen from both ends of the measured range, not taste:
+      #
+      #   free-space moves, 4s to 0.6s, settle to  <= 0.0009 rad
+      #   the jam above reached                       0.756  rad
+      #
+      # so this sits about 11x above the worst honest error and 75x below
+      # the failure it has to catch. It is also task-meaningful: 0.01 rad at
+      # the shoulder is ~8.5mm at full reach, and the whiskey bottle has
+      # 3.9mm of clearance a side in the gripper.
+      #
+      # NO `trajectory:` TOLERANCE, deliberately. That one polices
+      # |desired - actual| DURING the move, and it would abort the move that
+      # RECOVERS from a jam: measured, a free move peaks at 0.0045 (4s) to
+      # 0.0299 (0.6s), a jammed one at 1.3476 -- but driving back out of the
+      # jam peaked at 1.9505, because the trajectory starts from a setpoint
+      # left inside the worktop. Failing the recovery move is worse than
+      # catching the jam half a second earlier.
+      #
+      # Moves that are SUPPOSED not to arrive -- arm B pressing the opener
+      # onto the cap -- pass `may_stall` to Arm.follow_cartesian, which
+      # treats an aborted execution as the intended outcome. bartender_pour
+      # has no such move.
+      shoulder_pan_joint:
+        goal: 0.01
+      shoulder_lift_joint:
+        goal: 0.01
+      elbow_joint:
+        goal: 0.01
+      wrist_1_joint:
+        goal: 0.01
+      wrist_2_joint:
+        goal: 0.01
+      wrist_3_joint:
+        goal: 0.01
+
+gripper_controller:
+  ros__parameters:
+    joint: robotiq_85_left_knuckle_joint
+    action_monitor_rate: 20.0
+    goal_tolerance: 0.01
+    allow_stalling: true
+    # Deliberately effectively-infinite. When GripperActionController decides
+    # a goal has stalled it latches its hold position to wherever the joint
+    # currently is - which, for a grasp, is the exact moment the fingers
+    # first touch the object. The squeeze is then released and the object
+    # slides out during the lift.
+    #
+    # Closing onto an object is *supposed* to look like a permanent stall:
+    # the commanded angle is past the object's surface, so the position error
+    # never falls inside goal_tolerance and the goal legitimately stays
+    # active, holding clamping force, until it is preempted by the next
+    # gripper command. Callers must therefore NOT block on the result of a
+    # closing goal; see bartender_pour's grasp step.
+    stall_timeout: 3600.0

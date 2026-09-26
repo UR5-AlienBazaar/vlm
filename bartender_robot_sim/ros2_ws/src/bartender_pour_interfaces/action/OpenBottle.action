@@ -1,0 +1,35 @@
+# Open a capped bottle using both arms: one holds the bottle, the other
+# brings the opener down onto the cap and pushes.
+#
+# bottle_id names a station in bartender_open's STATIONS table ('beer' is
+# the only one that exists now, and the only one in the scene that has a
+# cap). It is a string rather than an enum for the same reason
+# PourDrink.bottle_id is: so adding a second capped bottle does not change
+# the interface.
+string bottle_id
+
+# Put the bottle back in its stand and the opener back on its post when the
+# cap is off. False leaves both arms holding what they picked up, which is
+# what you want when the next thing to happen is a pour from that bottle.
+bool stow_after
+---
+# Result
+bool success
+string message
+
+# Where the cap ended up, measured from the bottle's mouth after the opener
+# was lifted clear. This is the evidence that the bottle is actually open
+# rather than the sequence merely having run: a cap that is still sitting on
+# the lip reads near zero here, and success is false.
+float32 cap_displacement_m
+
+# How far the bottle moved while it was being pushed on. Small is the point
+# -- it is the measure of how well the holding arm did its job -- and it is
+# reported whether or not the open succeeded, because it is the first thing
+# to look at when one fails.
+float32 bottle_shift_m
+---
+# Feedback: coarse state machine progress, matching PourDrink's convention
+# so a UI can narrate both actions the same way.
+string state
+float32 progress

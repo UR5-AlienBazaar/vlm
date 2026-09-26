@@ -1,0 +1,9 @@
+# Sim pose of the optical frame (z fwd, x right, y down) in world, mapping optical points to world: Rz(pi) Ry(0.493051) of the SDF camera, times [[0,0,1],[-1,0,0],[0,-1,0]].
+optical_frame_id: stand_camera_optical_frame
+T_world_optical:
+  - [0.0, 0.473316, -0.880893, 0.75]
+  - [1.0, 0.0, 0.0, 0.0]
+  - [0.0, -0.880893, -0.473316, 1.35]
+  - [0.0, 0.0, 0.0, 1.0]
+# Depth outside this range is invalid (OAK-D near: ~0.2 extended disparity, ~0.35 without).
+depth_range: [0.2, 5.0]

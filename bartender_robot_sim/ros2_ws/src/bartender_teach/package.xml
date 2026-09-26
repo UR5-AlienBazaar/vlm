@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>bartender_teach</name>
+  <version>0.0.0</version>
+  <description>Teach pendant for recording named arm configurations, and the point-file library that reads them back</description>
+  <maintainer email="azmozgame@gmail.com">ami</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <!-- The real robot's controls (robot_control.py). All come with
+       ur_robot_driver; the pendant runs without them in simulation. -->
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>ur_dashboard_msgs</exec_depend>
+  <exec_depend>ur_msgs</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

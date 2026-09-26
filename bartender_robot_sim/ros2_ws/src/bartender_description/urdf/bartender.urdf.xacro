@@ -1,0 +1,240 @@
+<?xml version="1.0"?>
+<!--
+  Composes TWO UR5e arms (ros-humble-ur-description), each with a Robotiq
+  2F-85 gripper (ros-humble-robotiq-description) at its tool flange, plus the
+  ros2_control / gz_ros2_control wiring needed to drive all four in Gazebo
+  Sim.
+
+  NOTE: this file is written against the macro signatures published for
+  ur_description and robotiq_description as of ROS2 Humble. Run
+  `scripts/verify_description.sh` after installing/updating those packages
+  (or just `xacro bartender.urdf.xacro | check_urdf /dev/stdin`) and fix
+  any macro parameter mismatches it reveals; xacro macro APIs occasionally
+  gain or rename parameters between package releases.
+
+  ============ WHY ONE ARM IS PREFIXED AND THE OTHER IS NOT ============
+
+  Arm A keeps the bare ur_description names - shoulder_pan_joint, tool0,
+  base_link - and arm B gets everything under `b_`. That asymmetry is
+  deliberate and it is the single decision this file most needs to justify,
+  because the symmetric thing (a_/b_, or left_/right_) is what you would
+  write from scratch.
+
+  Renaming arm A would rename the planning frame, the end-effector link, the
+  six arm joints and the gripper joint. Those strings are not confined to
+  this package: they are the SRDF's group and every disable_collisions pair,
+  both MoveIt controller lists, the controller_manager config,
+  bartender_pour's ARM_JOINTS/EEF_LINK/PLANNING_FRAME/GRIPPER_JOINT, the
+  tool-frame definitions in bartender_teach - and the taught points the user
+  has already recorded and stored on disk, which are keyed by joint name and
+  would silently become unloadable.
+
+  Against that, the cost of the asymmetry is that you have to remember which
+  arm is which. ur_description's own default for tf_prefix is "", so the
+  unprefixed arm reads as "the original arm" rather than as an oversight,
+  and every new file added for the second arm names both explicitly.
+
+  If this ever grows a third arm, prefix everything then; the migration is
+  the same size whenever it happens, and until then this keeps a working,
+  tuned, tested pour pipeline working, tuned and tested.
+
+  ============ WHERE ARM B IS ============
+
+  Both arms hang off the same `world` link, which is what the ros_gz `create`
+  call positions when it spawns this description - so `world` is NOT the
+  Gazebo world origin, it is wherever arm A was spawned (see
+  bartender_gazebo/launch/sim.launch.py: -0.45 -0.40 0.9, i.e. at one end of the bar
+  top). Arm B's origin below is therefore
+  relative to arm A's base, not to the world, and ARM_B_ORIGIN in
+  bartender_open/layout.py has to agree with it. test_layout.py checks that
+  they do.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="bartender_ur5e">
+
+  <xacro:arg name="ur_type" default="ur5e"/>
+  <!-- Gazebo Sim (Ignition), not Gazebo Classic. Passing both sim_gazebo
+       and sim_ignition as true to ur_macro.xacro emits two <plugin> tags in
+       the same <hardware> block, which gz_ros2_control then fails to
+       resolve (it picks the first, classic one, which isn't registered). -->
+  <xacro:arg name="sim_ignition" default="true"/>
+  <xacro:arg name="use_fake_hardware" default="false"/>
+
+  <!-- Arm B's base, in arm A's base frame. 1.06 down the bar and 0.80
+       across, turned through pi so the two arms FACE EACH OTHER along the
+       bar top with the bottle line running between them.
+
+       That is a change. Arm B used to sit at 0.55 forward, 0.62 across and
+       yawed -pi/2, on a pedestal beside a counter too small to carry it.
+       The bar top is now big enough for both, and the yaw is what took the
+       longest to settle, so it is worth saying why it is pi and not zero.
+
+       Standing the two arms side by side, both facing the same way, was
+       tried first: it makes the frames differ by a pure translation, which
+       is tidy. It does not work. A UR5e carrying this gripper is not
+       symmetric about its own centreline: the wrist hangs to one side, so
+       with the fixed side-grasp tool orientation a target at negative y in
+       the arm's frame is reached by swinging the shoulder a long way past
+       the target's bearing. Parallel arms put the shared beer at positive y
+       for one arm and negative y for the other, and measured, the negative
+       one is the one that fails: arm B could not descend onto the cap.
+
+       Facing them at each other flips arm B's y axis, so the beer between
+       them is at +0.40 in BOTH frames and both arms work it from the same
+       well conditioned pose. The measurements behind that are in
+       bartender_open/layout.py under APPROACH_WINDOW. -->
+  <xacro:property name="arm_b_xyz" value="1.06 0.80 0.0"/>
+  <xacro:property name="arm_b_rpy" value="0 0 3.141592653589793"/>
+
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro"/>
+
+  <link name="world"/>
+
+  <!-- One arm + gripper. Called twice; everything that differs between the
+       two arms is a parameter, so there is no second copy of the macro call
+       to keep in sync. -->
+  <xacro:macro name="bartender_arm" params="prefix ur_name gripper_name *origin">
+    <xacro:ur_robot
+      name="${ur_name}"
+      tf_prefix="${prefix}"
+      parent="world"
+      ur_type="$(arg ur_type)"
+      joint_limits_parameters_file="$(find ur_description)/config/$(arg ur_type)/joint_limits.yaml"
+      kinematics_parameters_file="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"
+      physical_parameters_file="$(find ur_description)/config/$(arg ur_type)/physical_parameters.yaml"
+      visual_parameters_file="$(find ur_description)/config/$(arg ur_type)/visual_parameters.yaml"
+      safety_limits="false"
+      safety_pos_margin="0.15"
+      safety_k_position="20"
+      use_fake_hardware="$(arg use_fake_hardware)"
+      fake_sensor_commands="false"
+      sim_gazebo="false"
+      sim_ignition="$(arg sim_ignition)"
+      headless_mode="false"
+    >
+      <xacro:insert_block name="origin"/>
+    </xacro:ur_robot>
+
+    <xacro:robotiq_gripper
+      name="${gripper_name}"
+      prefix="${prefix}"
+      parent="${prefix}tool0"
+      use_fake_hardware="$(arg use_fake_hardware)"
+      include_ros2_control="true"
+      sim_ignition="$(arg sim_ignition)"
+    >
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:robotiq_gripper>
+  </xacro:macro>
+
+  <!-- ============ Arm A: the pouring arm, unprefixed ============ -->
+  <xacro:bartender_arm prefix="" ur_name="ur" gripper_name="RobotiqGripper">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:bartender_arm>
+
+  <!-- ============ Arm B: the opener arm, prefix b_ ============ -->
+  <xacro:bartender_arm prefix="b_" ur_name="ur_b" gripper_name="RobotiqGripperB">
+    <origin xyz="${arm_b_xyz}" rpy="${arm_b_rpy}"/>
+  </xacro:bartender_arm>
+
+  <!-- Gazebo cameras look along local +X. Pitching -90 degrees aligns that
+       optical axis with tool0 +Z, the gripper's approach direction. -->
+  <gazebo reference="tool0">
+    <sensor name="arm_a_wrist_camera" type="camera">
+      <pose>0.08 0 0.10 0 -1.5708 0</pose>
+      <always_on>true</always_on>
+      <update_rate>15</update_rate>
+      <topic>/bartender/arm_a/wrist_camera/image_raw</topic>
+      <camera>
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>320</width>
+          <height>240</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.03</near>
+          <far>5.0</far>
+        </clip>
+      </camera>
+    </sensor>
+    <sensor name="bartender_arm_a_wrist_camera_segmentation" type="segmentation">
+      <pose>0.08 0 0.10 0 -1.5708 0</pose>
+      <always_on>true</always_on>
+      <update_rate>15</update_rate>
+      <topic>/bartender/arm_a/wrist_camera/segmentation</topic>
+      <camera>
+        <segmentation_type>semantic</segmentation_type>
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>320</width>
+          <height>240</height>
+        </image>
+        <clip>
+          <near>0.03</near>
+          <far>5.0</far>
+        </clip>
+      </camera>
+    </sensor>
+  </gazebo>
+
+  <gazebo reference="b_tool0">
+    <sensor name="arm_b_wrist_camera" type="camera">
+      <pose>0.08 0 0.10 0 -1.5708 0</pose>
+      <always_on>true</always_on>
+      <update_rate>15</update_rate>
+      <topic>/bartender/arm_b/wrist_camera/image_raw</topic>
+      <camera>
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>320</width>
+          <height>240</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.03</near>
+          <far>5.0</far>
+        </clip>
+      </camera>
+    </sensor>
+  </gazebo>
+
+  <!-- NOTE on gripper pads and friction. This file is NOT rendered with
+       xacro directly; both sim.launch.py and move_group.launch.py run it
+       through bartender_description/scripts/render_bartender_urdf.py, which
+       widens the fingertip pads (and can groove them) and sets the pad
+       friction. That has to happen outside xacro because it must REMOVE
+       geometry that comes in from robotiq_description's macro. The script
+       matches fingertips by name SUFFIX, so it treats both grippers alike.
+
+       This used to carry a note claiming <gazebo reference> friction tags
+       "do nothing" on this spawn path. That was wrong, and it is worth
+       knowing why, because it wasted time. Two separate things are true:
+         - the <surface> blocks robotiq_description puts INSIDE its
+           <collision> elements really are dropped, because URDF has no such
+           element and the parser ignores it;
+         - <gazebo reference="link"><mu1> really does convert, verified with
+           `ign sdf -p`, but ONLY onto collisions that have no name=
+           attribute. Name them and the match fails silently, with no
+           warning and no <mu> in the output.
+       The original experiment swept mu during the old overhead NECK grasp,
+       which held the bottle geometrically with the fingers wrapped around
+       the neck, so friction could not have changed the result whatever the
+       tags did. The null result was real; the conclusion drawn from it was
+       not. -->
+
+  <!-- ============ gz_ros2_control plugin ============ -->
+  <!-- Only needed once for the whole model, however many arms it has:
+       ur_macro.xacro's sim_ignition arg already adds a <ros2_control> block
+       per arm and robotiq's macro one per gripper, and this single plugin
+       declaration starts the one controller_manager that owns all four and
+       points it at the shared controllers.yaml. -->
+  <xacro:if value="$(arg sim_ignition)">
+    <gazebo>
+      <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(find bartender_description)/config/controllers.yaml</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+</robot>

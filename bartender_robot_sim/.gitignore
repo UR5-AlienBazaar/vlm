@@ -1,0 +1,16 @@
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+__pycache__/
+*.pyc
+.vscode/
+log/
+# Lens Studio editor state (panel layout, IntelliSense config)
+ar/**/Workspaces/
+ar/**/jsconfig.json
+
+.env
+photos/
+# VLA/VLM recordings, datasets and checkpoints (live on the HF Hub, not in git)
+data/
+outputs/

@@ -1,0 +1,390 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <world name="bar_world">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <!-- Bullet rather than DART's default FCL narrowphase. This is the
+           single biggest lever on how long a pour takes, and it costs nothing
+           in fidelity.
+
+           Every link of the arm and gripper has a triangle-mesh collision.
+           Under FCL, the moment the gripper takes the bottle's weight the
+           real-time factor collapses from 1.0 to ~0.1, so trajectories that
+           are timed at 0.6-1.7s take 5-12s of wall clock. It is specifically
+           the loaded mesh contact: clamping on the bottle while it still rests
+           on the counter stays at RTF 1.0, and it recovers the instant the
+           bottle is released.
+
+           Measured over 4 pours each, same code, only this setting changed:
+             FCL     87.4 / 86.1 / 79.9 / 79.8 s
+             bullet  24.6 / 24.2 / 24.3 s
+           Both 4/4 with the bottle returned upright and within 8mm of its
+           station, so this buys ~3.4x for free.
+
+           Two things that did NOT work, for whoever tries next: halving the
+           step count (max_step_size 0.001 -> 0.002) changed the ratio not at
+           all, and raising the joint acceleration limits made the planned
+           trajectories shorter but the execution no faster - faster motion
+           just makes the contact solve harder by the same factor, and it
+           starts throwing the bottle. -->
+      <dart>
+        <collision_detector>bullet</collision_detector>
+      </dart>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.4 0.4 0.4 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ===================== THE BAR TOP =====================
+
+         Counter top surface is at world z = 0.9 (legs stand on the ground
+         plane at z=0). BOTH robot bases and everything standing on the top
+         are at that height, which is the coincidence the whole layout is
+         built on: a z in either arm's frame is "height above the counter".
+
+         The top is 1.76 (x) by 1.6 (y) centred at (0.08, 0), so it runs
+         x -0.80..0.96 and y -0.80..0.80. It used to be 1.2 by 0.6 with arm
+         B standing beside it on its own pedestal; the pedestal is gone and
+         both arms are bolted to this top, which is most of why it grew.
+
+         WHAT IS ON IT. Every number here is restated in
+         bartender_open/layout.py, which derives the slots from a pitch
+         rather than listing them, and test_layout.py compares the two file
+         against file.
+
+           the arms      A at (-0.45, -0.40) facing +x, B at (0.61, 0.40)
+                         facing -x. They FACE EACH OTHER down the bar with
+                         the bottle line between them. Arm B's yaw is the
+                         one number here that took measuring rather than
+                         choosing; layout.APPROACH_WINDOW has the table of
+                         readings and the reason.
+
+           bottle line   x = 0.08, i.e. 0.53 in front of each arm. Five
+                         slots at a 0.15 pitch, y = -0.30 to +0.30. Three
+                         are filled (whiskey, cola, beer) and two are free
+                         for whatever gets added next: that should cost a
+                         slot and a station name, not a re-survey.
+
+                         The line runs ACROSS each arm's approach, not
+                         along it, and that is the point of a line here.
+                         bartender_pour grasps from the side, running in
+                         along the arm's own +x, so slots at a common x each
+                         get a clear lane and no bottle stands behind
+                         another.
+
+                         It is five slots and not nine because of
+                         APPROACH_WINDOW: past y = +0.10 arm A can no longer
+                         take a bottle off the line in a pose that holds,
+                         and arm B picks up from y = -0.10 the other way.
+                         Slots outside both windows would be tabletop, not
+                         stations.
+
+           the glass     (0.20, -0.55), arm A's own station, further out
+                         than the line AND offset in y. The pour lays the
+                         bottle back 0.30 behind the glass at bottle
+                         height, so it sweeps across the line; the offset
+                         is what puts that sweep 0.25 clear of the nearest
+                         bottle instead of through it.
+
+           the holster   (0.10, 0.40), arm B's own station, and CLOSER in
+                         than the line rather than further out. Arm B
+                         descends vertically onto the opener, and a holster
+                         further out simply cannot be descended to: at 0.67
+                         from the base, measured, arm B stopped 346mm short
+                         and the goal failed outright.
+    -->
+    <include>
+      <uri>model://bar_counter</uri>
+      <name>bar_counter</name>
+      <pose>0.08 0 0.9 0 0 0</pose>
+    </include>
+
+    <!-- ===================== the bottle line =====================
+
+         y ascending. The free slots are y = +0.15 and +0.30; they hold
+         nothing, so there is nothing to include for them. They are named in
+         layout.BOTTLE_SLOTS, and that is where a new bottle gets added. -->
+
+    <!-- Label plugins tag objects for the segmentation cameras; the numbers are
+         LABEL_IDS in UR5-AlienBazaar/vlm training/vlm_labels.py (its test checks they match). -->
+    <include>
+      <uri>model://jack_daniels_bottle</uri>
+      <name>jack_daniels_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>1</label>
+      </plugin>
+      <pose>0.08 -0.30 0.9 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://cola_bottle</uri>
+      <name>cola_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>2</label>
+      </plugin>
+      <pose>0.08 -0.15 0.9 0 0 0</pose>
+    </include>
+
+    <!-- Bottle stands: shallow bottomless wells the bottle bases sit inside,
+         so a bottle that is nudged during place-and-release is stopped by a
+         wall 5-9mm away instead of toppling. Generated by
+         bartender_gazebo/scripts/make_bottle_stands.py, which carries the
+         reasoning and the dimensions.
+
+         Posed at the bottles' OWN station poses, and bottomless, so the
+         bottle bases still rest at z=0.9 exactly as before; every
+         grasp_height in bartender_pour is measured up from that base and
+         would otherwise be silently wrong. -->
+    <include>
+      <uri>model://whiskey_stand</uri>
+      <name>whiskey_stand</name>
+      <pose>0.08 -0.30 0.9 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://cola_stand</uri>
+      <name>cola_stand</name>
+      <pose>0.08 -0.15 0.9 0 0 0</pose>
+    </include>
+
+    <!-- ================= the beer, and what opens it =================
+
+         The beer takes the MIDDLE slot of the line, y = 0, which is the one
+         slot equidistant from the two arms: 0.664 from each, well inside a
+         UR5e's 850mm, and at +0.40 in BOTH arms' frames because they face
+         each other. It has to be a place both arms can work, since one
+         holds the bottle there while the other pushes down on it.
+
+         In the old layout the holster sat 112mm from the whiskey and the
+         carried opener hooked the bottle on its way past. Here they are
+         0.70m apart and on opposite sides of the line.
+
+         The beer sits in a well like the other two bottles (see
+         make_bottle_stands.py). It needs one more than they do: this is the
+         one bottle in the scene that gets pushed straight DOWN on while it
+         is standing there. -->
+    <include>
+      <uri>model://beer_stand</uri>
+      <name>beer_stand</name>
+      <pose>0.08 0.0 0.9 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://beer_bottle</uri>
+      <name>beer_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>3</label>
+      </plugin>
+      <pose>0.08 0.0 0.9 0 0 0</pose>
+    </include>
+
+    <!-- The cap. A separate model on purpose: it is held to the bottle by
+         the DetachableJoint declared inside beer_bottle's model.sdf, which
+         is the only mechanism here that can let go of it again. The joint
+         finds it by the model NAME below, so this name is load-bearing.
+
+         Pose is the beer's station at the bottle's lip, 0.2581 above its
+         base. Do not nudge it: the cap is modelled as a disc resting ON the
+         lip rather than as a skirt wrapped over it, precisely so that the
+         two bodies do not overlap when the joint releases them. -->
+    <include>
+      <uri>model://beer_cap</uri>
+      <name>beer_cap</name>
+      <pose>0.08 0.0 1.1581 0 0 0</pose>
+    </include>
+
+    <!-- ============== each arm's own working station ============== -->
+
+    <include>
+      <uri>model://serving_glass</uri>
+      <name>serving_glass</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>10</label>
+      </plugin>
+      <pose>0.20 -0.55 0.9 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://opener_holster</uri>
+      <name>opener_holster</name>
+      <pose>0.10 0.40 0.9 0 0 0</pose>
+    </include>
+
+    <!-- Opener, over the holster post. Its origin is the bell RIM, and the
+         rim is what it stands on: the post is 14mm against the bell's 16mm
+         depth, so it hangs inside the bell as a locator and the rim sits
+         flat on the counter at 0.9. -->
+    <include>
+      <uri>model://bottle_opener</uri>
+      <name>bottle_opener</name>
+      <pose>0.10 0.40 0.9 0 0 0</pose>
+    </include>
+
+    <!-- Simulated OAK-D depth on a stand; its pose is restated in bartender_api/config/stand_camera.yaml. -->
+    <model name="oak_d_stand">
+      <static>true</static>
+      <pose>0.75 0 1.35 0 0.493051 3.141593</pose>
+      <link name="link">
+        <sensor name="stand_depth" type="depth_camera">
+          <always_on>true</always_on>
+          <update_rate>15</update_rate>
+          <topic>/bartender/stand_camera/depth</topic>
+          <ignition_frame_id>stand_camera_optical_frame</ignition_frame_id>
+          <camera>
+            <camera_info_topic>/bartender/stand_camera/camera_info</camera_info_topic>
+            <horizontal_fov>1.2566</horizontal_fov>
+            <image>
+              <width>640</width>
+              <height>400</height>
+              <format>R_FLOAT32</format>
+            </image>
+            <clip>
+              <near>0.2</near>
+              <far>5.0</far>
+            </clip>
+            <noise>
+              <type>gaussian</type>
+              <mean>0.0</mean>
+              <stddev>0.004</stddev>
+            </noise>
+          </camera>
+        </sensor>
+        <!-- Colour twin of stand_depth: same pose, FOV and size, so pixels line up (OAK-D aligns RGB to depth). -->
+        <sensor name="stand_rgb" type="camera">
+          <always_on>true</always_on>
+          <update_rate>15</update_rate>
+          <topic>/bartender/stand_camera/rgb</topic>
+          <ignition_frame_id>stand_camera_optical_frame</ignition_frame_id>
+          <camera>
+            <horizontal_fov>1.2566</horizontal_fov>
+            <image>
+              <width>640</width>
+              <height>400</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>0.2</near>
+              <far>5.0</far>
+            </clip>
+          </camera>
+        </sensor>
+        <sensor name="bartender_stand_camera_segmentation" type="segmentation">
+          <always_on>true</always_on>
+          <update_rate>15</update_rate>
+          <topic>/bartender/stand_camera/segmentation</topic>
+          <camera>
+            <segmentation_type>semantic</segmentation_type>
+            <horizontal_fov>1.2566</horizontal_fov>
+            <image>
+              <width>640</width>
+              <height>400</height>
+            </image>
+            <clip>
+              <near>0.2</near>
+              <far>5.0</far>
+            </clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+
+    <!-- Top-down view of arm A's work area for the VLA policy: whiskey and cola
+         slots on the bottle line, and the glass. 1.1m above the counter, and the
+         72 degree FOV covers about 1.6m, so arm A's base is in frame too. -->
+    <model name="overhead_camera">
+      <static>true</static>
+      <pose>-0.05 -0.30 2.0 0 1.5708 0</pose>
+      <link name="link">
+        <sensor name="overhead_rgb" type="camera">
+          <always_on>true</always_on>
+          <update_rate>15</update_rate>
+          <topic>/bartender/overhead_camera/image_raw</topic>
+          <camera>
+            <horizontal_fov>1.2566</horizontal_fov>
+            <image>
+              <width>320</width>
+              <height>240</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>0.2</near>
+              <far>3.0</far>
+            </clip>
+          </camera>
+        </sensor>
+        <sensor name="bartender_overhead_camera_segmentation" type="segmentation">
+          <always_on>true</always_on>
+          <update_rate>15</update_rate>
+          <topic>/bartender/overhead_camera/segmentation</topic>
+          <camera>
+            <segmentation_type>semantic</segmentation_type>
+            <horizontal_fov>1.2566</horizontal_fov>
+            <image>
+              <width>320</width>
+              <height>240</height>
+            </image>
+            <clip>
+              <near>0.2</near>
+              <far>3.0</far>
+            </clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+
+    <!-- NO PEDESTAL. Arm B stood on one, beside the counter at (0.15, 0.62),
+         for as long as the counter was too small to carry both arms. It now
+         bolts to the bar top the way arm A does, so the pedestal model is
+         gone and so is the matching box bartender_open used to publish into
+         the planning scene. The robot is one model spawned by ros_gz create
+         and positioned at arm A's base; the description carries arm B from
+         there. -->
+
+  </world>
+</sdf>

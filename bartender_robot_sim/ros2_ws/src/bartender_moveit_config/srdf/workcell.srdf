@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SRDF for the workcell: ONE UR5e + Robotiq 2F-85 on the 1.40 x 0.70 table
+  (bartender_description/urdf/workcell.urdf.xacro).
+
+  Arm A's half of bartender.srdf, unchanged: same groups, same names, same
+  collision pairs, plus the table. bartender.srdf has the reasoning behind
+  all of it; only the table is new here, at the bottom.
+-->
+<robot name="bartender_workcell">
+
+  <group name="ur_manipulator">
+    <chain base_link="base_link" tip_link="tool0"/>
+  </group>
+
+  <group name="gripper">
+    <joint name="robotiq_85_left_knuckle_joint"/>
+  </group>
+  <end_effector name="robotiq_gripper" parent_link="tool0" group="gripper"/>
+
+  <!-- Matches bartender_pour/pour_action_server.py's WAYPOINTS_RAD; keep
+       these in sync if the placeholder waypoints there are retuned. -->
+  <group_state name="home" group="ur_manipulator">
+    <joint name="shoulder_pan_joint" value="0.0"/>
+    <joint name="shoulder_lift_joint" value="-1.57"/>
+    <joint name="elbow_joint" value="0.0"/>
+    <joint name="wrist_1_joint" value="-1.57"/>
+    <joint name="wrist_2_joint" value="0.0"/>
+    <joint name="wrist_3_joint" value="0.0"/>
+  </group_state>
+
+  <group_state name="gripper_open" group="gripper">
+    <joint name="robotiq_85_left_knuckle_joint" value="0.0"/>
+  </group_state>
+  <!-- robotiq_85_left_knuckle_joint is REVOLUTE: radians, limits 0.0 (open)
+       to 0.8 (closed). 0.04 here was a metres-vs-radians slip and left the
+       gripper effectively wide open. -->
+  <group_state name="gripper_closed" group="gripper">
+    <joint name="robotiq_85_left_knuckle_joint" value="0.75"/>
+  </group_state>
+
+  <!-- ============ arm self-collisions (from ur-moveit-config) ============ -->
+  <disable_collisions link1="base_link" link2="base_link_inertia" reason="Adjacent"/>
+  <disable_collisions link1="base_link_inertia" link2="shoulder_link" reason="Adjacent"/>
+  <disable_collisions link1="tool0" link2="wrist_1_link" reason="Never"/>
+  <disable_collisions link1="tool0" link2="wrist_2_link" reason="Never"/>
+  <disable_collisions link1="tool0" link2="wrist_3_link" reason="Adjacent"/>
+  <disable_collisions link1="forearm_link" link2="upper_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="forearm_link" link2="wrist_1_link" reason="Adjacent"/>
+  <disable_collisions link1="shoulder_link" link2="upper_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_1_link" link2="wrist_2_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_1_link" link2="wrist_3_link" reason="Never"/>
+  <disable_collisions link1="wrist_2_link" link2="wrist_3_link" reason="Adjacent"/>
+
+  <!-- ============ gripper mount + internal self-collisions ============ -->
+  <disable_collisions link1="tool0" link2="robotiq_85_base_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_3_link" link2="robotiq_85_base_link" reason="Adjacent"/>
+
+  <disable_collisions link1="robotiq_85_base_link" link2="robotiq_85_left_finger_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_base_link" link2="robotiq_85_left_finger_tip_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_base_link" link2="robotiq_85_left_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_base_link" link2="robotiq_85_left_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_base_link" link2="robotiq_85_right_finger_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_base_link" link2="robotiq_85_right_finger_tip_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_base_link" link2="robotiq_85_right_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_base_link" link2="robotiq_85_right_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_link" link2="robotiq_85_left_finger_tip_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_link" link2="robotiq_85_left_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_link" link2="robotiq_85_left_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_link" link2="robotiq_85_right_finger_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_link" link2="robotiq_85_right_finger_tip_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_link" link2="robotiq_85_right_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_link" link2="robotiq_85_right_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_tip_link" link2="robotiq_85_left_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_tip_link" link2="robotiq_85_left_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_tip_link" link2="robotiq_85_right_finger_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_tip_link" link2="robotiq_85_right_finger_tip_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_tip_link" link2="robotiq_85_right_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_finger_tip_link" link2="robotiq_85_right_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_inner_knuckle_link" link2="robotiq_85_left_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_inner_knuckle_link" link2="robotiq_85_right_finger_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_inner_knuckle_link" link2="robotiq_85_right_finger_tip_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_inner_knuckle_link" link2="robotiq_85_right_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_inner_knuckle_link" link2="robotiq_85_right_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_knuckle_link" link2="robotiq_85_right_finger_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_knuckle_link" link2="robotiq_85_right_finger_tip_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_knuckle_link" link2="robotiq_85_right_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_left_knuckle_link" link2="robotiq_85_right_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_right_finger_link" link2="robotiq_85_right_finger_tip_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_right_finger_link" link2="robotiq_85_right_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_right_finger_link" link2="robotiq_85_right_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_right_finger_tip_link" link2="robotiq_85_right_inner_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_right_finger_tip_link" link2="robotiq_85_right_knuckle_link" reason="Adjacent"/>
+  <disable_collisions link1="robotiq_85_right_inner_knuckle_link" link2="robotiq_85_right_knuckle_link" reason="Adjacent"/>
+
+  <!-- ============ the table ============
+       The base is bolted to it, and base_link_inertia and shoulder_link sit
+       on it at a fixed height whatever the joints do, so those pairs are
+       always in contact or never can be. Every link from upper_arm_link out
+       STAYS checked against the table: that is the collision this whole
+       table link exists to catch on the real robot. -->
+  <disable_collisions link1="workcell_table" link2="base_link" reason="Adjacent"/>
+  <disable_collisions link1="workcell_table" link2="base_link_inertia" reason="Adjacent"/>
+  <disable_collisions link1="workcell_table" link2="shoulder_link" reason="Never"/>
+
+</robot>

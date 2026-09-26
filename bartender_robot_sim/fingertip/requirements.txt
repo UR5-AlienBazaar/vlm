@@ -1,0 +1,7 @@
+# Runtime dependencies for fingertip.py.
+# build123d pulls the OCCT kernel in as cadquery-ocp-*; those are pinned too
+# because a kernel change can silently alter boolean results.
+build123d==0.11.1
+cadquery-ocp-novtk==7.9.3.1.1
+cadquery-ocp-proxy==7.9.3.1.1
+numpy==2.2.6

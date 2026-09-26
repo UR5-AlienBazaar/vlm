@@ -1,0 +1,230 @@
+<?xml version="1.0"?>
+<!--
+  The real workcell: ONE UR5e with a Robotiq 2F-85 on a 1.40 x 0.70 table.
+
+  This is the robot that actually exists. bartender.urdf.xacro is the
+  two-armed bar the skills were developed on in simulation, and it is kept
+  as it is; this file is what both the workcell sim and the real robot are
+  brought up from, so the two agree on where the table is.
+
+  The one arm is arm A of the two-armed description, with the same bare
+  ur_description names (shoulder_pan_joint, tool0, base_link), so the
+  controllers, the MoveIt group and the taught points carry over unchanged.
+
+  ============ THE TABLE ============
+
+  `world` is the table's corner, on its top surface. x runs along the 1.40
+  side, y along the 0.70 side, z up:
+
+       y
+       ^
+  0.70 +===============================================+
+       |                                               |
+  0.35 |     (UR5e) =>  +x                             |
+       |                                               |
+     0 +===============================================+==> x
+       0    0.35                                     1.40
+
+  The arm's base is at (0.35, 0.35): on the table's centreline and 0.35 in
+  from its end, so it has 1.05 of table in front of it.
+
+  The table is a LINK here and not only a model in the Gazebo world, on
+  purpose: that way MoveIt collision-checks against it on the real robot,
+  where there is no simulator to say it is there. Nothing has to publish it
+  into the planning scene first, so there is no window after startup where
+  the planner does not know about it. bartender_open learned that the hard
+  way; see the README.
+
+  ============ BEFORE THE FIRST REAL MOVE, CHECK ============
+
+  - arm_yaw. 0 means base_link's +x points down the long side of the table,
+    away from the near end. Nothing on the casing marks that direction, so
+    it has to be checked by moving the arm, and the teach pendant will mislead
+    you if you are not careful: the pendant's Base frame is ur_description's
+    `base`, which is turned pi from `base_link`. With arm_yaw 0, jogging +X
+    in Base on the pendant must move the tool TOWARD the near end (x = 0);
+    `jog x 20` in bartender_teach, which works in base_link, must move it
+    away. If neither is along the table, set arm_yaw until it is, or the
+    planner's table is somewhere the real one is not.
+  - table_height. Only the floor below the table depends on it (the arm
+    plans in its own base frame, which is on the table top), but it is a
+    guess until someone measures it.
+
+  ============ REAL HARDWARE ============
+
+  sim_ignition:=false with use_fake_hardware:=false gives the real UR
+  hardware interface, which needs robot_ip and the ur_robot_driver resource
+  files. bartender_bringup/launch/workcell_real.launch.py fills all of those
+  in; do not try to bring the real robot up from this file by hand.
+
+  The gripper is MOCKED on the real robot by default (gripper_fake_hardware),
+  because nothing has been decided yet about how it is wired: through the
+  UR's tool connector (RS-485, needs use_tool_communication) or on its own
+  USB adapter. A mocked gripper reports that it moved and does nothing, so
+  the arm can be brought up and moved safely before that is sorted out.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="bartender_workcell">
+
+  <xacro:arg name="ur_type" default="ur5e"/>
+  <xacro:arg name="sim_ignition" default="true"/>
+  <xacro:arg name="use_fake_hardware" default="false"/>
+  <xacro:arg name="gripper_fake_hardware" default="true"/>
+  <xacro:arg name="gripper_com_port" default="/tmp/ttyUR"/>
+
+  <!-- Only read when sim_ignition is false and use_fake_hardware is false.
+       workcell_real.launch.py passes all of them. -->
+  <xacro:arg name="robot_ip" default="0.0.0.0"/>
+  <xacro:arg name="reverse_ip" default="0.0.0.0"/>
+  <xacro:arg name="headless_mode" default="false"/>
+  <xacro:arg name="script_filename" default="to_be_filled_by_ur_robot_driver"/>
+  <xacro:arg name="input_recipe_filename" default="to_be_filled_by_ur_robot_driver"/>
+  <xacro:arg name="output_recipe_filename" default="to_be_filled_by_ur_robot_driver"/>
+  <xacro:arg name="use_tool_communication" default="false"/>
+  <xacro:arg name="tool_voltage" default="0"/>
+  <xacro:arg name="tool_device_name" default="/tmp/ttyUR"/>
+  <xacro:arg name="tool_tcp_port" default="54321"/>
+
+  <!-- Workcell geometry, metres. -->
+  <xacro:arg name="table_length" default="1.40"/>
+  <xacro:arg name="table_width" default="0.70"/>
+  <!-- Unmeasured. See the header. -->
+  <xacro:arg name="table_height" default="0.75"/>
+  <xacro:arg name="arm_x" default="0.35"/>
+  <xacro:arg name="arm_y" default="0.35"/>
+  <!-- -1.5708: set from the real cell 2026-09-25 (the base is turned 90 deg clockwise seen from above). -->
+  <xacro:arg name="arm_yaw" default="-1.5708"/>
+
+  <!-- Sim only. The twin (workcell_twin.launch.py) runs this same model in
+       Gazebo NEXT TO the real robot, so its controller_manager has to live
+       under a namespace and load controllers that follow the real arm
+       rather than plan on their own. The defaults are the plain sim. -->
+  <xacro:arg name="ros_namespace" default=""/>
+  <xacro:arg name="sim_controllers" default="workcell_controllers.yaml"/>
+
+  <xacro:property name="table_length" value="$(arg table_length)"/>
+  <xacro:property name="table_width" value="$(arg table_width)"/>
+  <xacro:property name="table_height" value="$(arg table_height)"/>
+
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro"/>
+
+  <link name="world"/>
+
+  <!-- The table, from the floor to the top surface. Its origin is the
+       corner at world, so the box is offset by half of each side. -->
+  <link name="workcell_table">
+    <visual>
+      <origin xyz="${table_length / 2} ${table_width / 2} ${-table_height / 2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${table_length} ${table_width} ${table_height}"/>
+      </geometry>
+      <material name="table_wood">
+        <color rgba="0.55 0.42 0.28 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="${table_length / 2} ${table_width / 2} ${-table_height / 2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${table_length} ${table_width} ${table_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <!-- Fixed to world, so these never enter the dynamics; they are here
+           because Gazebo drops a link with no inertial. -->
+      <origin xyz="${table_length / 2} ${table_width / 2} ${-table_height / 2}" rpy="0 0 0"/>
+      <mass value="50.0"/>
+      <inertia ixx="1.0" ixy="0" ixz="0" iyy="1.0" iyz="0" izz="1.0"/>
+    </inertial>
+  </link>
+  <joint name="world_to_table" type="fixed">
+    <parent link="world"/>
+    <child link="workcell_table"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="workcell_table">
+    <mu1>0.8</mu1>
+    <mu2>0.8</mu2>
+  </gazebo>
+
+  <xacro:ur_robot
+    name="ur"
+    tf_prefix=""
+    parent="world"
+    ur_type="$(arg ur_type)"
+    joint_limits_parameters_file="$(find ur_description)/config/$(arg ur_type)/joint_limits.yaml"
+    kinematics_parameters_file="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"
+    physical_parameters_file="$(find ur_description)/config/$(arg ur_type)/physical_parameters.yaml"
+    visual_parameters_file="$(find ur_description)/config/$(arg ur_type)/visual_parameters.yaml"
+    safety_limits="false"
+    safety_pos_margin="0.15"
+    safety_k_position="20"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    fake_sensor_commands="false"
+    sim_gazebo="false"
+    sim_ignition="$(arg sim_ignition)"
+    headless_mode="$(arg headless_mode)"
+    robot_ip="$(arg robot_ip)"
+    reverse_ip="$(arg reverse_ip)"
+    script_filename="$(arg script_filename)"
+    input_recipe_filename="$(arg input_recipe_filename)"
+    output_recipe_filename="$(arg output_recipe_filename)"
+    use_tool_communication="$(arg use_tool_communication)"
+    tool_voltage="$(arg tool_voltage)"
+    tool_device_name="$(arg tool_device_name)"
+    tool_tcp_port="$(arg tool_tcp_port)"
+  >
+    <origin xyz="$(arg arm_x) $(arg arm_y) 0" rpy="0 0 $(arg arm_yaw)"/>
+  </xacro:ur_robot>
+
+  <!-- In sim the gripper follows sim_ignition like the arm does. On the real
+       robot it is mocked unless gripper_fake_hardware:=false, in which case
+       robotiq_driver talks to it over gripper_com_port. -->
+  <xacro:robotiq_gripper
+    name="RobotiqGripper"
+    prefix=""
+    parent="tool0"
+    use_fake_hardware="${'$(arg sim_ignition)' != 'true' and ('$(arg use_fake_hardware)' == 'true' or '$(arg gripper_fake_hardware)' == 'true')}"
+    include_ros2_control="true"
+    sim_ignition="$(arg sim_ignition)"
+    com_port="$(arg gripper_com_port)"
+  >
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:robotiq_gripper>
+
+  <!-- Same wrist camera as arm A on the bar. Only Gazebo reads it. -->
+  <gazebo reference="tool0">
+    <sensor name="arm_a_wrist_camera" type="camera">
+      <pose>0.08 0 0.10 0 -1.5708 0</pose>
+      <always_on>true</always_on>
+      <update_rate>15</update_rate>
+      <topic>/bartender/arm_a/wrist_camera/image_raw</topic>
+      <camera>
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>320</width>
+          <height>240</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.03</near>
+          <far>5.0</far>
+        </clip>
+      </camera>
+    </sensor>
+  </gazebo>
+
+  <xacro:if value="$(arg sim_ignition)">
+    <gazebo>
+      <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(find bartender_description)/config/$(arg sim_controllers)</parameters>
+        <xacro:if value="${'$(arg ros_namespace)' != ''}">
+          <ros>
+            <namespace>$(arg ros_namespace)</namespace>
+          </ros>
+        </xacro:if>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+</robot>
