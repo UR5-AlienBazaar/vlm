@@ -21,6 +21,9 @@ from PIL import Image
 # here now so the answer format does not change, and force a retrain, when it lands.
 LABEL_IDS = {'whiskey': 1, 'cola': 2, 'beer': 3,
              'glass': 10, 'glass_b': 11, 'distractor': 20}
+# Every label in 20-29 is a distractor. The workcell capture gives each one its
+# own id so two distractors standing together never merge into one box.
+DISTRACTOR_IDS = range(20, 30)
 # Fewer pixels than this counts as not visible. The smallest full view is a
 # bottle seen top-down by the 320x240 overhead camera: 72 deg FOV from 1.1m is
 # ~5mm/px, so a 32mm-radius body is a ~13px disc, ~130px. 40px is ~30% of that,
@@ -50,6 +53,14 @@ def bbox(labels, label_id):
     h, w = labels.shape
     return [round(1000 * xs.min() / w), round(1000 * ys.min() / h),
             round(1000 * (xs.max() + 1) / w), round(1000 * (ys.max() + 1) / h)]
+
+
+def iou_boxes(a, b):
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
 
 
 def _overlaps(a, b, margin):
@@ -88,10 +99,9 @@ def scene_label(labels, bottles, glasses, in_gripper):
     Both flags are sim state, so their confidence is 1.0.
     """
     objects = {'bottles': _objects(labels, bottles), 'glasses': _objects(labels, glasses)}
-    distractor = bbox(labels, LABEL_IDS['distractor'])
     targets = [o['bbox'] for group in objects.values() for o in group if o['bbox']]
-    obstruction = bool(distractor) and any(
-        _overlaps(distractor, t, OBSTRUCTION_MARGIN) for t in targets)
+    obstruction = any(_overlaps(d, t, OBSTRUCTION_MARGIN)
+                      for d in distractor_boxes(labels) for t in targets)
     return {
         **objects,
         'in_gripper': {'value': in_gripper, 'confidence': 1.0},
@@ -99,12 +109,16 @@ def scene_label(labels, bottles, glasses, in_gripper):
     }
 
 
+def distractor_boxes(labels):
+    return [b for b in (bbox(labels, i) for i in DISTRACTOR_IDS if i in labels) if b]
+
+
 def bucket(scene, label, labels):
     """Coarse difficulty bucket for per-bucket eval: scene kind / distractor / bottles shown."""
     if label['obstruction']['value']:
         distractor = 'near'
     else:
-        distractor = 'far' if bbox(labels, LABEL_IDS['distractor']) else 'none'
+        distractor = 'far' if distractor_boxes(labels) else 'none'
     shown = '+'.join(b['name'] for b in label['bottles'] if b['visible']) or 'no_bottle'
     return f"{scene.get('kind', 'static')}/{distractor}/{shown}"
 
