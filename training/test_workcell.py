@@ -45,6 +45,22 @@ def test_next_action_priorities():
     assert next_action({'whiskey': {**base, 'blocked': True}}, 'whiskey')['action'] == 'clear_path'
     assert next_action({'whiskey': {**base, 'upright': False, 'blocked': True}}, 'whiskey')['action'] == 'report_fallen'
     assert next_action({'whiskey': {**base, 'visible': False}}, 'whiskey')['action'] == 'not_found'
+    held = {**base, 'in_gripper': True, 'blocked': True}
+    assert next_action({'whiskey': held}, 'whiskey')['action'] == 'already_holding'
+
+
+def test_a_bottle_in_the_gripper_is_held_not_fallen(tmp_path):
+    # w900_00008's order is whiskey (order_for), so the held bottle is the one asked for.
+    scene = make_scene(tmp_path, name='w900_00008', objects={'whiskey': {'on_table': False, 'in_gripper': True},
+                                          'vodka': {'on_table': True, 'xy': [0.9, 0.6], 'upright': True}})
+    frame = json.loads((scene / '0000.json').read_text())
+    (scene / '0000.json').write_text(json.dumps({**frame, 'in_gripper': 'whiskey'}))
+    truth = scene_truth(scene)
+    whiskey = truth['bottles']['whiskey']
+    assert whiskey['in_gripper'] and whiskey['upright'] and not whiskey['on_table']
+    assert not truth['bottles']['vodka']['in_gripper']
+    assert truth['buckets']['held'] == 'true'
+    assert truth['order'] == 'whiskey' and truth['next_action']['action'] == 'already_holding'
 
 
 def test_scene_truth_reads_the_capture_layout(tmp_path):
