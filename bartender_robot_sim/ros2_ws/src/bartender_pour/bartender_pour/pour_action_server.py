@@ -1112,6 +1112,7 @@ class PourActionServer(Node):
             self.get_logger().info(
                 f'clamped at {reached:.4f} rad, {position - reached:.4f} short '
                 f'of the command (goal left active)')
+            self._clamped_at = reached
             return True
 
         ok = self._block_on(
@@ -1123,17 +1124,20 @@ class PourActionServer(Node):
     def _still_holding_bottle(self, bottle: 'Bottle') -> bool:
         """Report whether the bottle is still in the fingers.
 
-        Same test as the grasp check: a held bottle keeps the joint stalled
-        short of the commanded angle, so if the fingers have since closed to
-        the command, the bottle went somewhere between then and now. Without
-        this the pour reports success even when the bottle was dropped mid
-        cycle and is lying on the counter.
+        A held bottle keeps the joint where it stalled at the grasp. If the
+        fingers have since closed more than GRASP_STALL_MARGIN past that, the
+        bottle slipped out or down between them. Judged against the measured
+        stall, not the command: the command check condemned good grasps
+        whenever the stall sat within the margin of clamp_pos (the grooved
+        pads, 0.37-0.39 against 0.44), and it could not see a partial slip
+        that left the fingers anywhere short of the command.
         """
         reached = self._gripper_position()
-        if abs(bottle.clamp_pos - reached) < GRASP_STALL_MARGIN:
+        stalled = getattr(self, '_clamped_at', None)
+        if stalled is not None and reached - stalled > GRASP_STALL_MARGIN:
             self._error(
                 f'{bottle.name} lost: fingers have closed to {reached:.4f} rad, '
-                f'the commanded {bottle.clamp_pos:.4f}, so they are now empty')
+                f'{reached - stalled:.4f} past where the grasp stalled ({stalled:.4f})')
             return False
         return True
 
