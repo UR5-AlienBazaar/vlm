@@ -3,7 +3,8 @@ import json
 import numpy as np
 from PIL import Image
 
-from vlm_labels import LABEL_IDS, MIN_VISIBLE_PX, bbox, export, is_val, scene_label
+from vlm_labels import (LABEL_IDS, MIN_VISIBLE_PX, bbox, export, is_val, scene_label,
+                        visibility_confidence)
 
 
 def _scene(h=100, w=200):
@@ -22,7 +23,9 @@ def test_sliver_is_not_visible():
     labels[10:60, 20:40] = LABEL_IDS['distractor']
     labels[10, 20:20 + MIN_VISIBLE_PX - 1] = LABEL_IDS['whiskey']
     label = scene_label(labels, ['whiskey'], [], None)
-    assert label['bottles'] == [{'name': 'whiskey', 'visible': False, 'bbox': None}]
+    assert label['bottles'] == [{'name': 'whiskey', 'visible': False,
+                                 'confidence': visibility_confidence(MIN_VISIBLE_PX - 1), 'bbox': None}]
+    assert label['bottles'][0]['confidence'] < 1
 
 
 def test_second_glass_is_another_entry_not_a_new_key():
@@ -34,15 +37,29 @@ def test_second_glass_is_another_entry_not_a_new_key():
 
 def test_distractor_against_a_target_is_an_obstruction():
     labels = _scene()
-    assert not scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']
+    assert not scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']['value']
     labels[10:60, 41:60] = LABEL_IDS['distractor']
-    assert scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']
+    assert scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']['value']
 
 
 def test_distractor_far_away_is_not_an_obstruction():
     labels = _scene()
     labels[70:95, 60:90] = LABEL_IDS['distractor']
-    assert not scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']
+    assert not scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']['value']
+
+
+def test_confidence_is_lowest_at_the_visibility_cutoff():
+    assert visibility_confidence(0) == 1.0
+    assert visibility_confidence(2 * MIN_VISIBLE_PX) == 1.0
+    assert visibility_confidence(MIN_VISIBLE_PX) == 0.5
+
+
+def test_partly_hidden_bottle_is_visible_but_less_certain():
+    labels = _scene()
+    labels[10:60, 20:40] = LABEL_IDS['distractor']
+    labels[10:13, 20:40] = LABEL_IDS['whiskey']
+    whiskey = scene_label(labels, ['whiskey'], [], None)['bottles'][0]
+    assert whiskey['visible'] and whiskey['confidence'] < 1
 
 
 def test_export_keeps_each_scene_in_one_split(tmp_path):
@@ -63,7 +80,9 @@ def test_export_keeps_each_scene_in_one_split(tmp_path):
     assert val_scenes == {f's{i:03d}' for i in range(40) if is_val(f's{i:03d}')}
     first = json.loads((tmp_path / 'out' / 'train.jsonl').read_text().splitlines()[0])
     answer = json.loads(first['messages'][1]['content'][0]['text'])
-    assert answer['in_gripper'] == 'whiskey'
+    assert answer['in_gripper'] == {'value': 'whiskey', 'confidence': 1.0}
+    assert first['camera'] == 'overhead'
+    assert first['bucket'] == 'static/none/whiskey'
     assert answer['glasses'][0]['name'] == 'glass'
     assert first['images'][0].endswith('_overhead_rgb.png')
 
@@ -83,3 +102,18 @@ def test_world_labels_match_label_ids():
               for inc in ET.parse(world).iter('include') if inc.find('plugin/label') is not None}
     assert labels == {'jack_daniels_bottle': LABEL_IDS['whiskey'], 'cola_bottle': LABEL_IDS['cola'],
                       'beer_bottle': LABEL_IDS['beer'], 'serving_glass': LABEL_IDS['glass']}
+
+
+def test_pour_stride_thins_pour_frames_only(tmp_path):
+    raw = tmp_path / 'raw'
+    for name, kind in (('pour', 'pour'), ('still', 'static')):
+        scene = raw / name
+        scene.mkdir(parents=True)
+        (scene / 'scene.json').write_text(json.dumps({'bottles': ['whiskey'], 'glasses': [], 'kind': kind}))
+        for i in range(4):
+            (scene / f'{i:04d}.json').write_text(json.dumps({'in_gripper': None}))
+            Image.fromarray(_scene()).save(scene / f'{i:04d}_overhead_labels.png')
+
+    counts = export(raw, tmp_path / 'out', pour_stride=2)
+
+    assert counts['train'] + counts['val'] == 2 + 4

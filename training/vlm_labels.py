@@ -32,10 +32,11 @@ MIN_VISIBLE_PX = 40
 OBSTRUCTION_MARGIN = 0.10
 VAL_PERCENT = 10
 
-PROMPT = ('Describe the bar scene as JSON with keys bottles (name, visible, bbox), '
-          'glasses (name, visible, bbox), in_gripper (bottle name or null) and '
-          'obstruction (true if something blocks a bottle or a glass). bbox is '
-          '[x0, y0, x1, y1] in 0-1000 image coordinates.')
+PROMPT = ('Describe the bar scene as JSON with keys bottles (name, visible, confidence, bbox), '
+          'glasses (name, visible, confidence, bbox), in_gripper ({value: bottle name or null, '
+          'confidence}) and obstruction ({value: true if something blocks a bottle or a glass, '
+          'confidence}). bbox is [x0, y0, x1, y1] in 0-1000 image coordinates. confidence is 0-1: '
+          'how sure you are of visible or value.')
 
 
 def bbox(labels, label_id):
@@ -58,9 +59,25 @@ def _overlaps(a, b, margin):
             a[1] < b[3] + grow_y and a[3] > b[1] - grow_y)
 
 
+def visibility_confidence(px):
+    """How clear-cut `visible` is for an object showing `px` pixels.
+
+    0.5 at the MIN_VISIBLE_PX cut-off, where the label is a coin flip, rising to
+    1.0 at 0 px or twice the cut-off. Measured against the fixed cut-off rather
+    than the object's full size: a half-hidden bottle filling the wrist view is
+    unambiguously visible, and GRPO's Brier term should not teach it otherwise.
+    """
+    return round(0.5 + 0.5 * min(1.0, abs(px - MIN_VISIBLE_PX) / MIN_VISIBLE_PX), 2)
+
+
 def _objects(labels, names):
-    return [{'name': n, 'visible': b is not None, 'bbox': b}
-            for n, b in ((n, bbox(labels, LABEL_IDS[n])) for n in names)]
+    objects = []
+    for name in names:
+        box = bbox(labels, LABEL_IDS[name])
+        px = int(np.count_nonzero(labels == LABEL_IDS[name]))
+        objects.append({'name': name, 'visible': box is not None,
+                        'confidence': visibility_confidence(px), 'bbox': box})
+    return objects
 
 
 def scene_label(labels, bottles, glasses, in_gripper):
@@ -68,16 +85,28 @@ def scene_label(labels, bottles, glasses, in_gripper):
 
     in_gripper comes from the simulator's state, not the image: the model learns
     to see it, but a bottle hidden in the fingers is still labelled as held.
+    Both flags are sim state, so their confidence is 1.0.
     """
     objects = {'bottles': _objects(labels, bottles), 'glasses': _objects(labels, glasses)}
     distractor = bbox(labels, LABEL_IDS['distractor'])
     targets = [o['bbox'] for group in objects.values() for o in group if o['bbox']]
+    obstruction = bool(distractor) and any(
+        _overlaps(distractor, t, OBSTRUCTION_MARGIN) for t in targets)
     return {
         **objects,
-        'in_gripper': in_gripper,
-        'obstruction': bool(distractor) and any(
-            _overlaps(distractor, t, OBSTRUCTION_MARGIN) for t in targets),
+        'in_gripper': {'value': in_gripper, 'confidence': 1.0},
+        'obstruction': {'value': obstruction, 'confidence': 1.0},
     }
+
+
+def bucket(scene, label, labels):
+    """Coarse difficulty bucket for per-bucket eval: scene kind / distractor / bottles shown."""
+    if label['obstruction']['value']:
+        distractor = 'near'
+    else:
+        distractor = 'far' if bbox(labels, LABEL_IDS['distractor']) else 'none'
+    shown = '+'.join(b['name'] for b in label['bottles'] if b['visible']) or 'no_bottle'
+    return f"{scene.get('kind', 'static')}/{distractor}/{shown}"
 
 
 def chat_record(image_path, label):
@@ -96,20 +125,26 @@ def is_val(scene_id):
     return int(digest, 16) % 100 < VAL_PERCENT
 
 
-def export(raw, out):
+def export(raw, out, pour_stride=1):
+    """Write train.jsonl and val.jsonl. Pour scenes keep every `pour_stride`-th
+    frame: at ~1.7 fps consecutive pour frames are near-duplicates."""
     out.mkdir(parents=True, exist_ok=True)
     counts = {'train': 0, 'val': 0}
     with open(out / 'train.jsonl', 'w') as train, open(out / 'val.jsonl', 'w') as val:
         for scene in sorted(p for p in raw.iterdir() if p.is_dir()):
-            objects = json.loads((scene / 'scene.json').read_text())
+            meta = json.loads((scene / 'scene.json').read_text())
+            stride = pour_stride if meta.get('kind') == 'pour' else 1
             split = 'val' if is_val(scene.name) else 'train'
             for labels_png in sorted(scene.glob('*_labels.png')):
-                frame = labels_png.name.split('_')[0]
+                frame, camera = labels_png.name.split('_')[:2]
+                if int(frame) % stride:
+                    continue
                 in_gripper = json.loads((scene / f'{frame}.json').read_text())['in_gripper']
                 labels = np.asarray(Image.open(labels_png))
                 rgb = labels_png.with_name(labels_png.name.replace('_labels', '_rgb'))
-                label = scene_label(labels, objects['bottles'], objects['glasses'], in_gripper)
+                label = scene_label(labels, meta['bottles'], meta['glasses'], in_gripper)
                 record = chat_record(rgb.relative_to(raw).as_posix(), label)
+                record.update(bucket=bucket(meta, label, labels), camera=camera)
                 (val if split == 'val' else train).write(json.dumps(record) + '\n')
                 counts[split] += 1
     return counts
@@ -119,8 +154,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('raw', type=Path, help='capture_vlm_frames.py output directory')
     parser.add_argument('out', type=Path, help='where train.jsonl and val.jsonl go')
+    parser.add_argument('--pour-stride', type=int, default=20,
+                        help='keep every Nth frame of a pour scene')
     opts = parser.parse_args()
-    print(export(opts.raw, opts.out))
+    print(export(opts.raw, opts.out, opts.pour_stride))
 
 
 if __name__ == '__main__':
