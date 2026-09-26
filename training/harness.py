@@ -111,6 +111,13 @@ def weakest_buckets(metrics, k=3, min_n=2):
     return [name for _, name in sorted(buckets)[:k]]
 
 
+def better(child, parent):
+    """Whether a candidate's metrics beat another's: the next action first, the total only
+    as a tie-break. Selecting on the total alone kept a prompt that saw the bottles better
+    but chose the action worse (dev total 0.53 -> 0.65 while action fell 0.61 -> 0.49)."""
+    return (child['action'], child['total']) > (parent['action'], parent['total'])
+
+
 def failure_report(items, answers, scores):
     worst = sorted(zip(scores, items, answers), key=lambda x: x[0]['total'])[:FAILURES_SHOWN]
     lines = []
@@ -233,7 +240,7 @@ def run(opts):
             child['experiment'], metrics, c_answers, c_scores = evaluate(
                 con, model, child, 'dev', dev, pool, state_ids, generation)
             lines.append(f"- {child['id']} ({child['origin']}): dev total {metrics['total']:.3f}, action {metrics['action']:.3f}")
-            if metrics['total'] > best_metrics['total'] and (winner is None or metrics['total'] > winner[1]['total']):
+            if better(metrics, best_metrics) and (winner is None or better(metrics, winner[1])):
                 winner = (child, metrics, c_answers, c_scores)
         if winner:
             best, best_metrics, answers, scores = winner
