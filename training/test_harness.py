@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 
 import harness
-from harness import (SEED_PROMPT, add_fewshot, build_messages, load_scenes, reflect, scene_request,
+from harness import (SEED_PROMPT, add_fewshot, better, build_messages, load_scenes, reflect, scene_request,
                      summarize, weakest_buckets)
 from test_workcell import make_scene
 from workcell import gold_answer
@@ -67,6 +67,13 @@ def test_fewshot_comes_from_a_weak_bucket(tmp_path):
     pool = {t['scene']: t for t in _scenes(tmp_path / 'pool', 3, camera='side')}
     assert add_fewshot({'fewshot': []}, pool, ['camera=side'], random.Random(0))[0] in pool
     assert add_fewshot({'fewshot': []}, pool, ['camera=front'], random.Random(0)) is None
+
+
+def test_selection_puts_the_action_before_the_total():
+    parent = {'action': 0.6, 'total': 0.5}
+    assert not better({'action': 0.5, 'total': 0.9}, parent)
+    assert better({'action': 0.6, 'total': 0.51}, parent)
+    assert better({'action': 0.7, 'total': 0.4}, parent)
 
 
 def test_a_run_selects_on_dev_logs_lineage_and_writes_the_journal(tmp_path, monkeypatch):
