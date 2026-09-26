@@ -1,8 +1,9 @@
 import math
 import random
 
-from capture_workcell_scenes import (ARM_BASE, BEER_CAP_HEIGHT, FOREARM, MIN_GAP, OBJECTS, PLACE_X, PLACE_Y,
-                                     REACH_FUDGE, SCENE_PARAMS, SHOULDER_Z, UPPER_ARM, WRIST_DROP, arm_ik,
+from capture_workcell_scenes import (ARM_BASE, BEER_CAP_HEIGHT, FOREARM, LABELS, MIN_GAP, MODELS, OBJECTS,
+                                     PLACE_X, PLACE_Y,
+                                     REACH_FUDGE, SCENE_PARAMS, SHOULDER_Z, UPPER_ARM, WRIST_DROP, WRIST_LATERAL, arm_ik,
                                      cap_xyz, held_sdf, look_at, sample_appearance, sample_arm,
                                      sample_held, sample_layout)
 
@@ -31,7 +32,7 @@ def test_bottles_land_on_the_table_apart():
 
 
 def test_blocking_distractor_stands_between_the_arm_and_a_bottle():
-    params = {**SCENE_PARAMS, 'bottle_p': 1.0, 'distractors': [0, 1], 'block_p': 1.0}
+    params = {**SCENE_PARAMS, 'bottle_p': 1.0, 'distractors': [0, 1], 'block_p': 1.0, 'named_distractor_p': 0.0}
     rng = random.Random(1)
     for _ in range(200):
         layout = sample_layout(rng, params)
@@ -42,9 +43,9 @@ def test_blocking_distractor_stands_between_the_arm_and_a_bottle():
 
 
 def test_distractor_kinds_restrict_the_pool():
-    params = {**SCENE_PARAMS, 'distractors': [0, 0, 1], 'distractor_kinds': ['wine']}
+    params = {**SCENE_PARAMS, 'distractors': [0, 0, 1], 'distractor_kinds': ['thermos'], 'named_distractor_p': 0.0}
     layout = sample_layout(random.Random(2), params)
-    assert [v['kind'] for k, v in layout.items() if k.startswith('distractor')] == ['wine']
+    assert [v['kind'] for k, v in layout.items() if k.startswith('distractor')] == ['thermos']
 
 
 def test_arm_ik_reaches_where_asked():
@@ -58,13 +59,20 @@ def test_arm_ik_reaches_where_asked():
 
 def test_over_bottle_aims_at_its_bottle():
     params = {**SCENE_PARAMS, 'bottle_p': 1.0, 'arm_pose': {'over_bottle': 1.0}}
-    rng = random.Random(3)
-    layout = sample_layout(rng, params)
-    kind, target, joints = sample_arm(rng, params, layout)
-    bx, by = layout[target]['xy']
-    assert kind == 'over_bottle'
-    aim = math.atan2(by - ARM_BASE[1], bx - ARM_BASE[0])
-    assert 0 < aim - (joints[0] - math.pi / 2) < 0.5  # turned short of it by the wrist's side offset
+    aimed = 0
+    for seed in range(20):  # a far bottle is out of reach and falls back to over_table
+        rng = random.Random(seed)
+        layout = sample_layout(rng, params)
+        kind, target, joints = sample_arm(rng, params, layout)
+        if kind != 'over_bottle':
+            continue
+        bx, by = layout[target]['xy']
+        aim = math.atan2(by - ARM_BASE[1], bx - ARM_BASE[0])
+        # Turned short of it by the wrist's side offset, at most that of the shortest reach drawn.
+        shortest = math.dist((bx, by), ARM_BASE) - 0.10
+        assert 0 < aim - (joints[0] - math.pi / 2) <= math.asin(min(1.0, WRIST_LATERAL / shortest)) + 1e-9
+        aimed += 1
+    assert aimed
 
 
 def test_appearance_can_be_turned_off():
@@ -94,3 +102,21 @@ def test_held_copy_is_a_static_labelled_visual():
     assert '<model name="held_beer"><static>true</static>' in sdf
     assert '<collision' not in sdf and 'detachable-joint' not in sdf
     assert '<label>3</label>' in sdf and '<uri>model://beer_bottle/meshes/' in sdf
+
+
+def test_named_distractor_counts_as_a_distractor_with_its_own_model():
+    params = {**SCENE_PARAMS, 'distractors': [1.0], 'named_distractor_p': 1.0}
+    layout = sample_layout(random.Random(7), params)
+    assert layout['distractor_ballantines']['kind'] == 'ballantines'
+    assert MODELS['distractor_ballantines'] == 'ballantines_bottle'
+
+
+def test_every_model_is_in_the_world_with_its_label():
+    import xml.etree.ElementTree as ET
+    from pathlib import Path
+    world = Path(__file__).resolve().parents[1] / 'ros2_ws/src/bartender_gazebo/worlds/workcell_world.sdf'
+    labels = {inc.findtext('name'): int(inc.findtext('plugin/label'))
+              for inc in ET.parse(world).iter('include') if inc.find('plugin/label') is not None}
+    assert {OBJECTS[b]: LABELS[b] for b in OBJECTS}.items() <= labels.items()
+    assert 20 <= labels[MODELS['distractor_ballantines']] <= 29
+    assert 2 not in {labels[m] for m in MODELS.values()}  # cola's label stays retired

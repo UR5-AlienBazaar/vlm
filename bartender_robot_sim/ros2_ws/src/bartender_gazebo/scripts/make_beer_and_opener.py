@@ -438,9 +438,10 @@ def beer_sdf():
             <scale>{BEER_MESH_SCALE} {BEER_MESH_SCALE} {BEER_MESH_SCALE}</scale>
           </mesh>
         </geometry>
+        <!-- Heineken green: the real bar's beer. -->
         <material>
-          <ambient>0.05 0.03 0.01 1</ambient>
-          <diffuse>0.35 0.19 0.05 1</diffuse>
+          <ambient>0.01 0.05 0.02 1</ambient>
+          <diffuse>0.06 0.30 0.10 1</diffuse>
           <specular>0.6 0.6 0.6 1</specular>
         </material>
       </visual>
