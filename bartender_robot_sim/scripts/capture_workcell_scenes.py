@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
 """Capture randomized workcell scenes from the Gazebo twin for the VLM dataset.
 
-Run inside the sim container while the twin is up:
-    ros2 launch bartender_bringup workcell_twin.launch.py use_fake_hardware:=true \\
-        headless:=true headless_rendering:=true
-    python3 scripts/capture_workcell_scenes.py data/workcell_raw --scenes 50 --seed 3
+Run inside the sim container while the twin is up (scripts/workcell_vlm_twin.sh):
+    python3 scripts/capture_workcell_scenes.py data/workcell_raw/<gen> --scenes 50 --seed 3 \\
+        [--params params.json]
 
-Each scene: the mock arm moves to a random pose (the twin copies it), bottles
-and distractors are placed on the table, one camera is put at a
-random viewpoint, and one RGB + segmentation pair is saved together with the
-objects' settled poses. The layout matches vlm/training/vlm_labels.py:
+Each scene: the bottles (in workcell_world.sdf) and some distractors are
+placed on the table or knocked over, the lighting and colours change, the
+mock arm moves to a pose the twin copies (sometimes hovering over a bottle so
+it hides part of it), one camera is put at a random viewpoint, and one RGB +
+segmentation pair is saved with the objects' settled poses. The layout is the
+contract with vlm/training (vlm_labels.py and the harness):
 
-    <out>/<scene>/scene.json    bottles, glasses, camera, params
-    <out>/<scene>/0000.json     in_gripper, settled object poses, arm joints
-    <out>/<scene>/0000_cam_rgb.png, 0000_cam_labels.png
+    <out>/<scene>/scene.json    bottles, glasses ([]), camera, appearance, params
+    <out>/<scene>/0000.json     in_gripper, settled object poses, arm
+    <out>/<scene>/0000_cam_rgb.png, 0000_cam_labels.png   (labels: bottles 1-3, distractors 20-29)
 
 --params takes a JSON file overriding SCENE_PARAMS, which is how the VLM
 harness steers what gets generated towards the cases the model gets wrong.
+Re-running the same command after a crash resumes: finished scenes are
+skipped and their random draws replayed, so the result is the same as an
+uninterrupted run.
 """
 import argparse
+import colorsys
 import json
 import math
 import random
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -42,21 +48,32 @@ UPRIGHT_MAX_TILT_DEG = 20
 # Bottle -> its model in workcell_world.sdf. The real workcell has no glass.
 OBJECTS = {'whiskey': 'jack_daniels_bottle', 'cola': 'cola_bottle', 'beer': 'beer_bottle'}
 BEER_CAP_HEIGHT = 0.2581  # the beer's lip above its base; see bar_world.sdf
-# Distractor labels are 20 + index: vlm_labels treats 20-29 as distractors,
-# and separate labels keep two distractors from merging into one box.
+# Distractor i gets label 20 + i: vlm_labels treats 20-29 as distractors, and
+# separate labels keep two distractors from merging into one box. Each is a
+# list of (geometry, height of its centre above the model's base), so the base
+# is the origin and a distractor stands on the table like a bottle does.
+# `wine` is a bottle that is none of ours: the hard negative.
 DISTRACTORS = [
-    ('box', '<box><size>0.07 0.07 0.16</size></box>', (0.2, 0.4, 0.8)),
-    ('can', '<cylinder><radius>0.033</radius><length>0.12</length></cylinder>', (0.8, 0.1, 0.1)),
-    ('carton', '<box><size>0.10 0.05 0.20</size></box>', (0.9, 0.85, 0.3)),
+    ('box', [('<box><size>0.07 0.07 0.16</size></box>', 0.08)]),
+    ('can', [('<cylinder><radius>0.033</radius><length>0.12</length></cylinder>', 0.06)]),
+    ('carton', [('<box><size>0.10 0.05 0.20</size></box>', 0.10)]),
+    ('wine', [('<cylinder><radius>0.037</radius><length>0.21</length></cylinder>', 0.105),
+              ('<cylinder><radius>0.014</radius><length>0.09</length></cylinder>', 0.255)]),
+    ('mug', [('<cylinder><radius>0.045</radius><length>0.10</length></cylinder>', 0.05)]),
+    ('ball', [('<sphere><radius>0.04</radius></sphere>', 0.04)]),
+    ('spray', [('<cylinder><radius>0.025</radius><length>0.22</length></cylinder>', 0.11)]),
+    ('book', [('<box><size>0.20 0.14 0.035</size></box>', 0.0175)]),
 ]
 
 SCENE_PARAMS = {
     'bottle_p': 0.7,          # each bottle is on the table
     'fallen_p': 0.08,         # a present bottle lies on its side
-    'distractors': [0.4, 0.4, 0.2],  # P(0, 1, 2 distractors)
+    'distractors': [0.3, 0.35, 0.25, 0.1],  # P(0, 1, 2, 3 distractors)
+    'distractor_kinds': None,  # restrict to these DISTRACTORS names, e.g. ["wine"]
     'block_p': 0.4,           # a distractor stands between the arm and a bottle
-    'arm_pose': {'home': 0.3, 'over_table': 0.7},
+    'arm_pose': {'home': 0.25, 'over_table': 0.4, 'over_bottle': 0.35},
     'camera': {'front': 0.35, 'side': 0.25, 'overhead': 0.2, 'corner': 0.2},
+    'appearance_p': 0.8,      # lighting and colours are randomized; else the world's own look
 }
 # Viewpoint families: eye (centre, jitter) and the point it looks at. The real
 # camera's mount is not decided, so every scene draws one; the family is
@@ -72,6 +89,22 @@ CAM_HFOV = 1.2566  # OAK-D, the same as the bar's stand camera
 ARM_JOINTS = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
               'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
 HOME = [0.0, -1.57, 0.0, -1.57, 0.0, 0.0]
+# The arm reaches along world angle pan - pi/2 (measured on the twin: pan 0
+# reaches -y, pan pi/2 reaches +x, down the table), because arm_yaw is -pi/2.
+PAN_OFFSET = math.pi / 2
+# UR5e: shoulder height, upper arm, forearm, and wrist_3 below wrist_1 when the
+# tool points down. REACH_FUDGE is the horizontal distance the wrist offsets
+# add, measured: planar 0.55 put wrist_3 at 0.66 from the base.
+SHOULDER_Z, UPPER_ARM, FOREARM, WRIST_DROP = 0.1625, 0.425, 0.3922, 0.0997
+REACH_FUDGE = 0.11
+# d4: wrist_3 sits this far to the side of the arm's plane, so aiming the pan
+# straight at a bottle put the wrist 0.29 rad off it at 0.46 reach (measured).
+WRIST_LATERAL = 0.1333
+# Wrist this high over the table keeps the gripper's fingers just above a
+# bottle's top (~0.27), so a hover hides the bottle rather than hits it.
+HOVER_Z = (0.45, 0.55)
+TABLE_COLOURS = [(0.62, 0.50, 0.36), (0.45, 0.33, 0.22), (0.80, 0.80, 0.78),
+                 (0.30, 0.30, 0.32), (0.12, 0.12, 0.12), (0.55, 0.60, 0.65)]
 TMP = Path('/tmp/workcell_vlm')
 
 
@@ -115,11 +148,13 @@ def sample_layout(rng, params):
             if spot:
                 placed[name] = {'xy': spot, 'yaw': rng.uniform(-math.pi, math.pi),
                                 'fallen': rng.random() < params['fallen_p']}
-    bottles = [b for b in ('whiskey', 'cola', 'beer') if b in placed]
+    bottles = [b for b in OBJECTS if b in placed]
+    kinds = [i for i, (k, _) in enumerate(DISTRACTORS)
+             if not params.get('distractor_kinds') or k in params['distractor_kinds']]
     n = rng.choices(range(len(params['distractors'])), params['distractors'])[0]
-    for i in range(n):
+    for i in rng.sample(kinds, min(n, len(kinds))):
         spot = None
-        if i == 0 and bottles and rng.random() < params['block_p']:
+        if not any(k.startswith('distractor') for k in placed) and bottles and rng.random() < params['block_p']:
             bx, by = placed[rng.choice(bottles)]['xy']
             ax, ay = ARM_BASE
             d = math.dist((ax, ay), (bx, by))
@@ -127,18 +162,49 @@ def sample_layout(rng, params):
             spot = (bx + (ax - bx) * back + rng.uniform(-0.02, 0.02),
                     by + (ay - by) * back + rng.uniform(-0.02, 0.02))
         placed[f'distractor{i}'] = {'xy': spot or free_spot() or (1.2, 0.1),
-                                    'yaw': rng.uniform(-math.pi, math.pi), 'fallen': False}
+                                    'yaw': rng.uniform(-math.pi, math.pi), 'fallen': False,
+                                    'kind': DISTRACTORS[i][0]}
     return placed
 
 
-def sample_arm(rng, params):
+def arm_ik(reach, height):
+    """Shoulder lift and elbow that put wrist_3 `reach` from the base and `height`
+    above the table with the tool pointing down, or None if out of reach."""
+    r = reach - REACH_FUDGE
+    dz = height + WRIST_DROP - SHOULDER_Z
+    c = (r * r + dz * dz - UPPER_ARM ** 2 - FOREARM ** 2) / (2 * UPPER_ARM * FOREARM)
+    if not -1 <= c <= 1:
+        return None
+    elbow = math.acos(c)
+    lift = -(math.atan2(dz, r) + math.atan2(FOREARM * math.sin(elbow), UPPER_ARM + FOREARM * math.cos(elbow)))
+    return lift, elbow
+
+
+def arm_joints(pan, lift, elbow, wrist_3=0.0):
+    # wrist_1 keeps the tool pointing straight down whatever lift and elbow are.
+    return [pan, lift, elbow, -math.pi / 2 - (lift + elbow), -math.pi / 2, wrist_3]
+
+
+def sample_arm(rng, params, layout):
     kind = _choice(rng, params['arm_pose'])
-    if kind == 'home':
-        return kind, HOME
-    # Pan swept over the table's side of the arm, elbow bent down towards it.
-    # Unconstrained joints drove the twin through the table and it never arrived.
-    return kind, [rng.uniform(-2.6, -0.5), rng.uniform(-2.0, -1.0), rng.uniform(0.8, 2.0),
-                  rng.uniform(-2.2, -1.0), rng.uniform(-1.8, -1.3), rng.uniform(-math.pi, math.pi)]
+    bottles = [b for b in OBJECTS if b in layout]
+    if kind == 'over_bottle' and bottles:
+        target = rng.choice(bottles)
+        bx, by = layout[target]['xy']
+        dx, dy = bx - ARM_BASE[0], by - ARM_BASE[1]
+        # Short of it or over it: either way the arm is between it and most cameras.
+        reach = math.hypot(dx, dy) - rng.uniform(0.0, 0.10)
+        ik = arm_ik(reach, rng.uniform(*HOVER_Z))
+        if ik:
+            pan = math.atan2(dy, dx) + PAN_OFFSET - math.asin(min(1.0, WRIST_LATERAL / reach))
+            return kind, target, arm_joints(pan, *ik, rng.uniform(-math.pi, math.pi))
+        kind = 'over_table'
+    if kind == 'home' or kind == 'over_bottle':
+        return 'home', None, HOME
+    ik = None
+    while ik is None:  # far and high together is out of reach; draw again
+        ik = arm_ik(rng.uniform(0.35, 0.75), rng.uniform(0.35, 0.65))
+    return kind, None, arm_joints(rng.uniform(-1.1, 1.1) + PAN_OFFSET, *ik, rng.uniform(-math.pi, math.pi))
 
 
 def sample_camera(rng, params):
@@ -149,10 +215,38 @@ def sample_camera(rng, params):
     return family, eye, look_at(eye, target)
 
 
+def _rgb(rng, sat=(0.3, 0.9), val=(0.25, 0.95)):
+    return tuple(round(c, 3) for c in colorsys.hsv_to_rgb(rng.random(), rng.uniform(*sat), rng.uniform(*val)))
+
+
+def sample_appearance(rng, params):
+    """Sun, table, floor and distractor colours; None keeps the world's own look."""
+    distractors = {f'distractor{i}': _rgb(rng) for i in range(len(DISTRACTORS))}
+    if rng.random() >= params['appearance_p']:
+        return None, distractors
+    warm = rng.uniform(-0.25, 0.25)  # <0 bluish daylight, >0 warm bar lighting
+    elevation = rng.uniform(0.5, 1.4)
+    azimuth = rng.uniform(-math.pi, math.pi)
+    return {
+        'sun': {'intensity': round(rng.uniform(0.5, 1.6), 3),
+                'diffuse': tuple(round(min(1.0, 0.85 + d), 3) for d in (warm, 0.0, -warm)),
+                'direction': tuple(round(v, 3) for v in (math.cos(azimuth) * math.cos(elevation),
+                                                         math.sin(azimuth) * math.cos(elevation),
+                                                         -math.sin(elevation)))},
+        'table': tuple(round(min(1.0, max(0.0, c + rng.uniform(-0.06, 0.06))), 3)
+                       for c in rng.choice(TABLE_COLOURS)),
+        'ground': (round(rng.uniform(0.15, 0.7), 3),) * 3,
+    }, distractors
+
+
+DEFAULT_LOOK = {'sun': {'intensity': 1.0, 'diffuse': (0.8, 0.8, 0.8), 'direction': (-0.5, 0.1, -0.9)},
+                'table': (0.62, 0.50, 0.36), 'ground': (0.4, 0.4, 0.4)}
+
+
 def _ign(service, reqtype, req, reptype='ignition.msgs.Boolean'):
-    subprocess.run(['ign', 'service', '-s', f'/world/{WORLD}/{service}', '--reqtype', reqtype,
-                    '--reptype', reptype, '--timeout', '5000', '--req', req],
-                   check=True, capture_output=True)
+    return subprocess.run(['ign', 'service', '-s', f'/world/{WORLD}/{service}', '--reqtype', reqtype,
+                           '--reptype', reptype, '--timeout', '5000', '--req', req],
+                          check=True, capture_output=True, text=True).stdout
 
 
 def set_pose(model, x, y, z, rpy=(0.0, 0.0, 0.0)):
@@ -160,6 +254,31 @@ def set_pose(model, x, y, z, rpy=(0.0, 0.0, 0.0)):
     _ign('set_pose', 'ignition.msgs.Pose',
          f'name: "{model}" position {{x: {x} y: {y} z: {z}}} '
          f'orientation {{x: {qx} y: {qy} z: {qz} w: {qw}}}')
+
+
+def _colour(rgb):
+    r, g, b = rgb
+    return f'{{r: {r} g: {g} b: {b} a: 1}}'
+
+
+def set_colour(visual_id, rgb):
+    dim = tuple(c * 0.6 for c in rgb)
+    _ign('visual_config', 'ignition.msgs.Visual',
+         f'id: {visual_id} material {{ambient {_colour(dim)} diffuse {_colour(rgb)}}}')
+
+
+def set_sun(sun):
+    x, y, z = sun['direction']
+    _ign('light_config', 'ignition.msgs.Light',
+         f'name: "sun" type: DIRECTIONAL diffuse {_colour(sun["diffuse"])} '
+         f'specular {{r: 0.2 g: 0.2 b: 0.2 a: 1}} direction {{x: {x} y: {y} z: {z}}} '
+         f'cast_shadows: true intensity: {sun["intensity"]}')
+
+
+def visual_ids():
+    """Visual name -> entity id, for the uniquely named visuals set_colour recolours."""
+    scene = _ign('scene/info', 'ignition.msgs.Empty', '', reptype='ignition.msgs.Scene')
+    return {name: int(i) for name, i in re.findall(r'name: "([^"]+)"\s*\n\s*id: (\d+)', scene)}
 
 
 def spawn(name, sdf, z=HIDDEN_Z):
@@ -173,14 +292,16 @@ def spawn(name, sdf, z=HIDDEN_Z):
 LABEL_PLUGIN = '<plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>{}</label></plugin>'
 
 
-def distractor_sdf(name, geometry, rgb, label):
-    color = ' '.join(map(str, rgb))
+def distractor_sdf(name, parts, label):
+    shapes = ''.join(
+        f'<collision name="{name}_c{k}"><pose>0 0 {z} 0 0 0</pose><geometry>{g}</geometry></collision>'
+        # A starting material: visual_config recolours it, but turns a visual without one black.
+        f'<visual name="{name}_v{k}"><pose>0 0 {z} 0 0 0</pose><geometry>{g}</geometry>'
+        '<material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.7 0.7 0.7 1</diffuse></material></visual>'
+        for k, (g, z) in enumerate(parts))
     return (f'<sdf version="1.9"><model name="{name}"><link name="link">'
-            '<inertial><mass>0.2</mass></inertial>'
-            f'<collision name="c"><geometry>{geometry}</geometry></collision>'
-            f'<visual name="v"><geometry>{geometry}</geometry>'
-            f'<material><ambient>{color} 1</ambient><diffuse>{color} 1</diffuse></material></visual>'
-            f'</link>{LABEL_PLUGIN.format(label)}</model></sdf>')
+            '<inertial><mass>0.2</mass><inertia><ixx>0.0005</ixx><iyy>0.0005</iyy><izz>0.0005</izz>'
+            f'</inertia></inertial>{shapes}</link>{LABEL_PLUGIN.format(label)}</model></sdf>')
 
 
 def camera_sdf():
@@ -235,8 +356,12 @@ class Sim:
         while time.monotonic() < end:
             self.rclpy.spin_once(self.node, timeout_sec=0.05)
 
-    def move_arm(self, joints, seconds=2.0):
-        """Move the mock robot; twin_mirror makes the Gazebo arm follow."""
+    def move_arm(self, joints, seconds=2.0, wait=4.0):
+        """Move the mock robot; twin_mirror makes the Gazebo arm follow.
+
+        True once the twin is there. The twin can fall short, e.g. pressed on
+        a bottle or the table, and the pose that counts is the one it holds.
+        """
         from builtin_interfaces.msg import Duration
         from trajectory_msgs.msg import JointTrajectoryPoint
 
@@ -253,13 +378,15 @@ class Sim:
         end = time.monotonic() + seconds + 10
         while not done.done() and time.monotonic() < end:
             self.spin(0.05)
-        # The twin trails the mock by the mirror's latency; wait until it arrives.
-        end = time.monotonic() + 8
+        end = time.monotonic() + wait
         while time.monotonic() < end:
             if all(abs(self.joints.get(j, 1e9) - q) < 0.03 for j, q in zip(ARM_JOINTS, joints)):
                 return True
             self.spin(0.1)
         return False
+
+    def twin_joints(self):
+        return [round(self.joints.get(j, float('nan')), 3) for j in ARM_JOINTS]
 
     def frame(self, timeout=15.0):
         self.latest.clear()
@@ -321,6 +448,32 @@ def settled_objects(sim, models):
     return out
 
 
+def arm_state(sim):
+    """The twin's own joints and its wrist in table coordinates (link poses are
+    reported relative to the robot model, whose origin is the table's corner)."""
+    wrist = sim.pose('wrist_3_link')
+    return {'joints': sim.twin_joints(), 'wrist_xyz': wrist and wrist['xyz']}
+
+
+def apply_appearance(ids, look, distractor_colours):
+    look = look or DEFAULT_LOOK
+    set_sun(look['sun'])
+    set_colour(ids['workcell_table_visual'], look['table'])
+    set_colour(ids['ground_visual'], look['ground'])
+    for name, rgb in distractor_colours.items():
+        for visual, i in ids.items():
+            if visual.startswith(f'{name}_v'):
+                set_colour(i, rgb)
+
+
+def replay(rng, params):
+    """Draw what a scene draws, in the same order as main(), without the sim."""
+    layout = sample_layout(rng, params)
+    sample_appearance(rng, params)
+    sample_arm(rng, params, layout)
+    sample_camera(rng, params)
+
+
 def save(scene_dir, rgb, labels, frame):
     from PIL import Image as PILImage
     img = np.frombuffer(rgb.data, np.uint8).reshape(rgb.height, rgb.width, -1)
@@ -338,6 +491,9 @@ def main():
     parser.add_argument('--params', type=Path, help='JSON overriding SCENE_PARAMS')
     opts = parser.parse_args()
     params = {**SCENE_PARAMS, **(json.loads(opts.params.read_text()) if opts.params else {})}
+    unknown = set(params) - set(SCENE_PARAMS)
+    if unknown:
+        raise SystemExit(f'unknown params: {sorted(unknown)}')
     rng = random.Random(opts.seed)
     TMP.mkdir(exist_ok=True)
 
@@ -347,36 +503,51 @@ def main():
         sim.spin(2.0)
         if sim.pose(OBJECTS['beer']) is None:
             raise RuntimeError('no bottles in the world: is this workcell_world.sdf from this branch?')
-        for i, (_, geometry, rgb) in enumerate(DISTRACTORS):
+        for i, (_, parts) in enumerate(DISTRACTORS):
             if sim.pose(f'distractor{i}') is None:
-                spawn(f'distractor{i}', distractor_sdf(f'distractor{i}', geometry, rgb, 20 + i))
+                spawn(f'distractor{i}', distractor_sdf(f'distractor{i}', parts, 20 + i))
         if sim.pose('vlm_camera') is None:
             spawn('vlm_camera', camera_sdf(), z=2.0)
         sim.spin(2.0)
+        ids = visual_ids()
 
         for n in range(opts.scenes):
             started = time.monotonic()
             scene_dir = opts.out / f'w{opts.seed:03d}_{n:05d}'
+            if (scene_dir / 'scene.json').exists():
+                replay(rng, params)
+                continue
             scene_dir.mkdir(parents=True, exist_ok=True)
-            arm_kind, joints = sample_arm(rng, params)
-            arm_ok = sim.move_arm(joints)
+            # Clear the table first, so bottles are never teleported into the arm.
+            sim.move_arm(HOME, seconds=1.0, wait=2.0)
             layout = sample_layout(rng, params)
             for i, name in enumerate(names):
                 place(model_name(name), layout.get(name), 10 + i)
+            look, distractor_colours = sample_appearance(rng, params)
+            apply_appearance(ids, look, distractor_colours)
+            sim.spin(0.5)
+            arm_kind, arm_target, joints = sample_arm(rng, params, layout)
+            arm_ok = sim.move_arm(joints)
             family, eye, rpy = sample_camera(rng, params)
             set_pose('vlm_camera', *eye, rpy)
             sim.spin(1.5)  # physics settles, the camera re-renders
             rgb, labels = sim.frame()
-            objects = settled_objects(sim, {n: model_name(n) for n in names if n in layout})
+            objects = settled_objects(sim, {k: model_name(k) for k in names if k in layout})
+            for name, spot in layout.items():
+                if 'kind' in spot:
+                    objects[name]['kind'] = spot['kind']
             save(scene_dir, rgb, labels, {
                 'in_gripper': None, 'objects': objects,
-                'arm': {'kind': arm_kind, 'joints': [round(q, 3) for q in joints], 'reached': arm_ok}})
+                'arm': {'kind': arm_kind, 'target': arm_target, 'reached': arm_ok, **arm_state(sim),
+                        'commanded': [round(q, 3) for q in joints]}})
             (scene_dir / 'scene.json').write_text(json.dumps({
                 'bottles': list(OBJECTS), 'glasses': [], 'kind': 'workcell',
                 'seed': opts.seed, 'index': n, 'frames': 1,
                 'seconds': round(time.monotonic() - started, 1),
                 'camera': {'family': family, 'eye': [round(v, 3) for v in eye],
                            'rpy': [round(v, 4) for v in rpy], 'size': CAM_SIZE, 'hfov': CAM_HFOV},
+                'appearance': {'randomized': look is not None, **(look or DEFAULT_LOOK),
+                               'distractors': {k: v for k, v in distractor_colours.items() if k in layout}},
                 'arm_base': ARM_BASE, 'table': TABLE,
                 'params': {'layout': {k: {**v, 'xy': [round(c, 3) for c in v['xy']]} for k, v in layout.items()},
                            'scene_params': params}}, indent=1))

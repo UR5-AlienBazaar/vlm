@@ -80,7 +80,7 @@
             </plane>
           </geometry>
         </collision>
-        <visual name="visual">
+        <visual name="ground_visual">
           <geometry>
             <plane>
               <normal>0 0 1</normal>
