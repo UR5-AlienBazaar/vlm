@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/UR5-AlienBazaar/vlm/contracts/scene-v1.schema.json",
+  "title": "VLM Scene API v1",
+  "type": "object",
+  "required": ["schema_version", "request_id", "camera", "observation", "model", "objects"],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "camera": {
+      "type": "object",
+      "required": ["id", "captured_at"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "captured_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["observed", "unknown"]},
+        "reason": {"type": "string"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"}
+      }
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "visible", "confidence"],
+        "properties": {
+          "name": {"type": "string"},
+          "visible": {"type": "boolean"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "bbox": {
+            "type": ["array", "null"],
+            "items": {"type": "integer", "minimum": 0, "maximum": 1000},
+            "minItems": 4,
+            "maxItems": 4
+          }
+        }
+      }
+    },
+    "obstruction": {"type": ["boolean", "null"]}
+  }
+}
