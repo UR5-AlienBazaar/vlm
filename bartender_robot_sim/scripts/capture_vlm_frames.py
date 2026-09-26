@@ -41,6 +41,15 @@ HELD_PHASES = {'lifting', 'moving_to_glass', 'tilting_to_pour', 'pouring',
 # A bottle leaning more than this at the end of a pour fell over (the scripted
 # place can land it on the stand's rim); such scenes are flagged, not dropped.
 UPRIGHT_MAX_TILT_DEG = 20
+# A bottle further than this from its stand after a pour was dropped or knocked,
+# even if it landed upright: the next pick would miss it.
+STATION_TOL_M = 0.03
+# State log rate for pour episodes: enough to follow a slip through the tilt,
+# where the camera frames come at under 1 Hz.
+STATE_HZ = 20
+# Whiskey is square and its side grasp assumes the faces square to the pads,
+# so it only gets jitter; the cola is round and may stand at any yaw.
+WHISKEY_YAW_JITTER = 0.05
 HIDDEN = (5.0, 0.0, 0.2)
 DISTRACTOR_SDF = '/tmp/vlm_distractor.sdf'
 
@@ -113,7 +122,7 @@ class Capture:
     def __init__(self):
         import rclpy
         from rclpy.action import ActionClient
-        from sensor_msgs.msg import Image
+        from sensor_msgs.msg import Image, JointState
         from tf2_msgs.msg import TFMessage
         from bartender_pour_interfaces.action import PourDrink
 
@@ -132,8 +141,32 @@ class Capture:
         self.node.create_subscription(
             TFMessage, f'/world/{WORLD}/dynamic_pose/info',
             lambda m: self.poses.update({t.child_frame_id: t.transform for t in m.transforms}), 2)
+        self.joints = {}
+        self.node.create_subscription(
+            JointState, '/joint_states',
+            lambda m: self.joints.update(zip(m.name, zip(m.position, m.velocity or [0.0] * len(m.name)))), 10)
+        self.states = None
+        self.node.create_timer(1.0 / STATE_HZ, self._record_state)
         self.pour = ActionClient(self.node, PourDrink, 'pour_drink')
         self.PourDrink = PourDrink
+
+    def _record_state(self):
+        if self.states is not None:
+            self.states.append({
+                't': round(time.monotonic() - self.t0, 3), 'state': self.state,
+                'joints': {n: [round(p, 4), round(v, 4)] for n, (p, v) in self.joints.items()},
+                'objects': self.object_poses()})
+
+    def object_poses(self):
+        """Bottles and glass: position and tilt from vertical, straight from Gazebo."""
+        out = {}
+        for name, model in {**MODELS, 'glass': 'serving_glass'}.items():
+            t = self.poses.get(model)
+            if t is not None:
+                out[name] = {'xyz': [round(t.translation.x, 4), round(t.translation.y, 4),
+                                     round(t.translation.z, 4)],
+                             'tilt_deg': round(tilt_deg(t.rotation), 1)}
+        return out
 
     def on_feedback(self, msg):
         if msg.feedback.state != self.state:
@@ -191,33 +224,77 @@ def static_scene(cap, scene_dir, rng):
     return [*scene['shown'], 'beer'], {'params': scene}
 
 
-def pour_scene(cap, scene_dir, max_frames=300):
-    """Run the scripted pour (whiskey then cola, from their home spots) and film it.
+def poured(phases, bottle):
+    """Whether the bottle's pour dwell ran to the end, i.e. its untilt was reached.
+
+    There is no fluid in the sim: the pour is a timed dwell at full tilt, so
+    completing the dwell is the only measure of volume there is.
+    """
+    states = [s for _, s in phases]
+    return f'pouring_{bottle}' in states and f'returning_upright_{bottle}' in states
+
+
+def pour_outcome(result_success, phases, start, end, recipe=('whiskey', 'cola')):
+    """Judge a pour by where things ended up, not by the action's own verdict.
+
+    Clean means the action succeeded, every recipe bottle finished its pour,
+    and every bottle is back upright within STATION_TOL_M of where it started.
+    The action alone reported success for runs that left bottles on their side.
+    """
+    bottles = {}
+    for name, before in start.items():
+        if name == 'glass' or name not in end:
+            continue
+        after = end[name]
+        moved = math.dist(before['xyz'][:2], after['xyz'][:2])
+        bottles[name] = {'upright': after['tilt_deg'] < UPRIGHT_MAX_TILT_DEG,
+                         'moved_m': round(moved, 3), 'on_station': moved < STATION_TOL_M}
+    completed = {b: poured(phases, b) for b in recipe}
+    clean = (bool(result_success) and all(completed.values())
+             and all(b['upright'] and b['on_station'] for b in bottles.values()))
+    return {'clean': clean, 'action_success': bool(result_success),
+            'poured': completed, 'bottles': bottles}
+
+
+def pour_scene(cap, scene_dir, rng, images=True, max_seconds=400):
+    """Run the scripted pour (whiskey then cola) from randomized yaws, film it, log state at STATE_HZ.
 
     At the sim's ~1.7 fps software rendering the whole recipe takes ~200 frames.
     """
-    reset()
+    yaw = {'whiskey': rng.uniform(-WHISKEY_YAW_JITTER, WHISKEY_YAW_JITTER),
+           'cola': rng.uniform(-math.pi, math.pi)}
+    reset(yaw=yaw)
     cap.spin(1.5)
-    cap.state, cap.phases, cap.t0 = '', [], time.monotonic()
+    start = cap.object_poses()
+    cap.state, cap.phases, cap.t0, cap.states = '', [], time.monotonic(), []
     goal = cap.PourDrink.Goal(bottle_id='whiskey', glass_id='serving_glass', pour_amount_ml=40.0)
     cap.pour.wait_for_server(timeout_sec=60)
     accepted = cap.pour.send_goal_async(goal, feedback_callback=cap.on_feedback)
     finished = None
-    for i in range(max_frames):
-        pairs = cap.frames()
-        save(scene_dir, i, pairs, held_bottle(cap.state))
+    i = 0
+    while time.monotonic() - cap.t0 < max_seconds:
+        if images:
+            save(scene_dir, i, cap.frames(), held_bottle(cap.state))
+            i += 1
         if finished is None and accepted.done():
             finished = accepted.result().get_result_async()
         if finished is not None and finished.done():
             break
         cap.spin(1.0)
+    cap.spin(2.0)  # let a bottle that was just released finish falling before judging it
+    end = cap.object_poses()
+    with open(scene_dir / 'states.jsonl', 'w') as f:
+        f.writelines(json.dumps(s) + '\n' for s in cap.states)
+    cap.states = None
     result = finished.result().result if finished is not None and finished.done() else None
-    return ['whiskey', 'cola', 'beer'], {'pour': {
+    return ['whiskey', 'cola', 'beer'], {'params': {'yaw': yaw}, 'pour': {
         'finished': result is not None,
-        'success': bool(result and result.success),
-        'message': result.message if result else 'still running at max_frames',
+        'message': result.message if result else f'still running after {max_seconds}s',
         'phases': cap.phases,
+        'start_poses': start,
+        'end_poses': end,
         'upright_after': cap.upright(),
+        **pour_outcome(result is not None and result.success, cap.phases, start, end),
     }}
 
 
@@ -230,6 +307,8 @@ def main():
     # pour frames are near-duplicates, so a training capture wants this low.
     parser.add_argument('--pour-p', type=float, default=POUR_P,
                         help='fraction of scenes that run the scripted pour')
+    parser.add_argument('--no-images', action='store_true',
+                        help='pour trials only: skip the camera frames, keep the state log')
     opts = parser.parse_args()
     rng = random.Random(opts.seed)
     cap = Capture()
@@ -239,14 +318,19 @@ def main():
         scene_dir.mkdir(parents=True, exist_ok=True)
         pour = rng.random() < opts.pour_p
         started = time.monotonic()
-        bottles, log = pour_scene(cap, scene_dir) if pour else static_scene(cap, scene_dir, rng)
+        if pour:
+            bottles, log = pour_scene(cap, scene_dir, rng, images=not opts.no_images)
+        else:
+            bottles, log = static_scene(cap, scene_dir, rng)
         frames = len(list(scene_dir.glob('*_overhead_rgb.png')))
         (scene_dir / 'scene.json').write_text(json.dumps({
             'bottles': bottles, 'glasses': ['glass'], 'kind': 'pour' if pour else 'static',
             'seed': opts.seed, 'index': n, 'frames': frames,
             'seconds': round(time.monotonic() - started, 1), **log}, indent=1))
-        print(f'{scene_dir.name} {"pour" if pour else "static"} {frames} frames '
-              f'{json.dumps(log.get("pour", {}).get("upright_after", ""))}', flush=True)
+        outcome = log.get('pour', {})
+        print(f'{scene_dir.name} {"pour" if pour else "static"} {frames} frames'
+              + (f' clean={outcome["clean"]} action={outcome["action_success"]} '
+                 f'poured={outcome["poured"]} {outcome["message"]!r}' if pour else ''), flush=True)
 
 
 if __name__ == '__main__':
