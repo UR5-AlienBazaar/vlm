@@ -300,10 +300,20 @@ def set_sun(sun):
          f'cast_shadows: true intensity: {sun["intensity"]}')
 
 
-def visual_ids():
-    """Visual name -> entity id, for the uniquely named visuals set_colour recolours."""
-    scene = _ign('scene/info', 'ignition.msgs.Empty', '', reptype='ignition.msgs.Scene')
-    return {name: int(i) for name, i in re.findall(r'name: "([^"]+)"\s*\n\s*id: (\d+)', scene)}
+def visual_ids(required, tries=10):
+    """Visual name -> entity id, for the uniquely named visuals set_colour recolours.
+
+    Just after spawning, scene/info can come back without some visuals (a twin
+    crashed on a missing workcell_table_visual), so ask until all are listed.
+    """
+    for _ in range(tries):
+        scene = _ign('scene/info', 'ignition.msgs.Empty', '', reptype='ignition.msgs.Scene')
+        ids = {name: int(i) for name, i in re.findall(r'name: "([^"]+)"\s*\n\s*id: (\d+)', scene)}
+        missing = [r for r in required if r not in ids]
+        if not missing:
+            return ids
+        time.sleep(1.0)
+    raise RuntimeError(f'scene/info never listed {missing}')
 
 
 def spawn(name, sdf, z=HIDDEN_Z):
@@ -580,7 +590,8 @@ def main():
         if sim.pose('vlm_camera') is None:
             spawn('vlm_camera', camera_sdf(), z=2.0)
         sim.spin(2.0)
-        ids = visual_ids()
+        ids = visual_ids(['workcell_table_visual', 'ground_visual',
+                          *(f'distractor{i}_v0' for i in range(len(DISTRACTORS)))])
 
         for n in range(opts.scenes):
             started = time.monotonic()
