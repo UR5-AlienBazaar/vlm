@@ -3,8 +3,8 @@ import json
 import numpy as np
 from PIL import Image
 
-from vlm_labels import (LABEL_IDS, MIN_VISIBLE_PX, bbox, export, is_val, scene_label,
-                        visibility_confidence)
+from vlm_labels import (ARM_A_BASE, LABEL_IDS, MIN_VISIBLE_PX, STANDS, bbox, blocked, bucket, export,
+                        is_val, scene_label, visibility_confidence)
 
 
 def _scene(h=100, w=200):
@@ -22,7 +22,7 @@ def test_sliver_is_not_visible():
     labels = _scene()
     labels[10:60, 20:40] = LABEL_IDS['distractor']
     labels[10, 20:20 + MIN_VISIBLE_PX - 1] = LABEL_IDS['whiskey']
-    label = scene_label(labels, ['whiskey'], [], None)
+    label = scene_label(labels, ['whiskey'], [], None, False)
     assert label['bottles'] == [{'name': 'whiskey', 'visible': False,
                                  'confidence': visibility_confidence(MIN_VISIBLE_PX - 1), 'bbox': None}]
     assert label['bottles'][0]['confidence'] < 1
@@ -31,21 +31,35 @@ def test_sliver_is_not_visible():
 def test_second_glass_is_another_entry_not_a_new_key():
     labels = _scene()
     labels[50:90, 100:120] = LABEL_IDS['glass_b']
-    label = scene_label(labels, ['whiskey'], ['glass', 'glass_b'], None)
+    label = scene_label(labels, ['whiskey'], ['glass', 'glass_b'], None, False)
     assert [(g['name'], g['visible']) for g in label['glasses']] == [('glass', True), ('glass_b', True)]
 
 
-def test_distractor_against_a_target_is_an_obstruction():
-    labels = _scene()
-    assert not scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']['value']
-    labels[10:60, 41:60] = LABEL_IDS['distractor']
-    assert scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']['value']
+def _midway(a, b):
+    return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
 
 
-def test_distractor_far_away_is_not_an_obstruction():
-    labels = _scene()
-    labels[70:95, 60:90] = LABEL_IDS['distractor']
-    assert not scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']['value']
+def test_distractor_on_the_reach_to_a_shown_bottle_blocks():
+    params = {'shown': ['whiskey'], 'glass': (0.2, -0.55),
+              'distractor': _midway(ARM_A_BASE, STANDS['whiskey'])}
+    assert blocked(params)
+
+
+def test_distractor_on_the_reach_to_a_hidden_bottle_does_not_block():
+    params = {'shown': ['cola'], 'glass': (0.2, -0.55),
+              'distractor': (STANDS['whiskey'][0] - 0.01, STANDS['whiskey'][1] - 0.04)}
+    assert not blocked(params)
+
+
+def test_distractor_beside_the_reaches_does_not_block():
+    assert not blocked({'shown': ['whiskey', 'cola'], 'glass': (0.2, -0.55), 'distractor': (0.0, 0.2)})
+    assert not blocked({'shown': ['whiskey'], 'glass': (0.2, -0.55), 'distractor': None})
+    assert not blocked({})
+
+
+def test_obstruction_is_sim_state_whatever_the_picture_shows():
+    label = scene_label(_scene(), ['whiskey'], ['glass'], None, True)
+    assert label['obstruction'] == {'value': True, 'confidence': 1.0}
 
 
 def test_confidence_is_lowest_at_the_visibility_cutoff():
@@ -58,7 +72,7 @@ def test_partly_hidden_bottle_is_visible_but_less_certain():
     labels = _scene()
     labels[10:60, 20:40] = LABEL_IDS['distractor']
     labels[10:13, 20:40] = LABEL_IDS['whiskey']
-    whiskey = scene_label(labels, ['whiskey'], [], None)['bottles'][0]
+    whiskey = scene_label(labels, ['whiskey'], [], None, False)['bottles'][0]
     assert whiskey['visible'] and whiskey['confidence'] < 1
 
 
@@ -137,4 +151,5 @@ def test_pour_stride_thins_pour_frames_only(tmp_path):
 def test_any_label_in_20_to_29_is_a_distractor():
     labels = _scene()
     labels[10:60, 41:60] = 23
-    assert scene_label(labels, ['whiskey'], ['glass'], None)['obstruction']['value']
+    label = scene_label(labels, ['whiskey'], ['glass'], None, False)
+    assert bucket({}, label, labels) == 'static/far/whiskey'

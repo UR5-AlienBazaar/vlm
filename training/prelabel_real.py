@@ -52,22 +52,25 @@ def _entry(item, name):
 def canonical_label(answer):
     """The model's answer in training-label shape: all six bottles in fixed order, unknown names dropped.
 
-    None if the answer is not a JSON object.
+    None if the answer is not a JSON object in that shape.
     """
     raw = _json_object(answer)
     if raw is None:
         return None
-    seen = {b.get('name'): b for b in raw.get('bottles', []) if b.get('name') in BOTTLES}
-    bottles = [_entry(seen.get(name, {}), name) for name in BOTTLES]
-    glasses = [_entry(g, GLASS) for g in raw.get('glasses', []) if g.get('bbox') is not None]
-    gripper = raw.get('in_gripper') or {}
-    obstruction = raw.get('obstruction') or {}
-    held = gripper.get('value')
-    return {'bottles': bottles, 'glasses': glasses,
-            'in_gripper': {'value': held if held in BOTTLES else None,
-                           'confidence': float(gripper.get('confidence', 0.5))},
-            'obstruction': {'value': bool(obstruction.get('value')),
-                            'confidence': float(obstruction.get('confidence', 0.5))}}
+    try:
+        seen = {b.get('name'): b for b in raw.get('bottles', []) if b.get('name') in BOTTLES}
+        bottles = [_entry(seen.get(name, {}), name) for name in BOTTLES]
+        glasses = [_entry(g, GLASS) for g in raw.get('glasses', []) if g.get('bbox') is not None]
+        gripper = raw.get('in_gripper') or {}
+        obstruction = raw.get('obstruction') or {}
+        held = gripper.get('value')
+        return {'bottles': bottles, 'glasses': glasses,
+                'in_gripper': {'value': held if held in BOTTLES else None,
+                               'confidence': float(gripper.get('confidence', 0.5))},
+                'obstruction': {'value': bool(obstruction.get('value')),
+                                'confidence': float(obstruction.get('confidence', 0.5))}}
+    except (AttributeError, TypeError, ValueError):
+        return None  # e.g. a nested list as a bbox: label that photo by hand
 
 
 def draw_preview(image_path, label, out_path):
