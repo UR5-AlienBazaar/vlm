@@ -9,7 +9,9 @@
 # Not run_docker.sh: that rebuilds the image first and uses host networking,
 # which on Docker Desktop is the VM's network, so the viewer port would not
 # reach Windows. Every ROS node here lives in this one container, so DDS
-# does not need the host network.
+# does not need the host network. Containers on one bridge do still hear each
+# other, so each twin gets its own ROS domain: three twins on domain 57 had
+# their spawners configuring each other's controllers and one segfaulted.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 NAME=${TWIN_NAME:-vlm-twin}
@@ -22,7 +24,7 @@ if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia; then
     gpu=(--gpus "${GPUS:-all}" --env NVIDIA_DRIVER_CAPABILITIES=all)
 fi
 docker run -d --name "$NAME" "${gpu[@]}" -p "127.0.0.1:$PORT:$PORT" \
-    --env IGN_PARTITION="$NAME" --env ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-57}" \
+    --env IGN_PARTITION="$NAME" --env ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-$((PORT % 100))}" \
     --user "$(id -u):$(id -g)" --env HOME=/tmp \
     -v "$PWD:/workspace" -w /workspace "$IMAGE" \
     bash -c 'source /opt/ros/humble/setup.bash && source ros2_ws/install/setup.bash && \
