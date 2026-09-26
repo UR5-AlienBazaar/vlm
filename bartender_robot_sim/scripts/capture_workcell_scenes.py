@@ -20,9 +20,11 @@ contract with vlm/training (vlm_labels.py and the harness):
 harness steers what gets generated towards the cases the model gets wrong.
 Re-running the same command after a crash resumes: finished scenes are
 skipped and their random draws replayed, so the result is the same as an
-uninterrupted run.
+uninterrupted run. Every run appends one summary line (sim commit, params,
+what it captured and how long it took) to capture_runs.jsonl next to <out>.
 """
 import argparse
+import collections
 import colorsys
 import json
 import math
@@ -520,6 +522,25 @@ def replay(rng, params):
     sample_camera(rng, params)
 
 
+def log_run(out, opts, params, started, scenes, resumed, error=None):
+    """One line per capture run in <out>/../capture_runs.jsonl: the run log to look at
+    before the scenes themselves."""
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True,
+                            cwd=Path(__file__).parent).stdout.strip() or None
+    count = lambda key: dict(collections.Counter(s[key] for s in scenes))  # noqa: E731
+    line = {
+        'finished_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'out': str(out),
+        'seed': opts.seed, 'requested': opts.scenes, 'captured': len(scenes), 'resumed': resumed,
+        'error': error, 'sim_commit': commit, 'wall_s': round(time.monotonic() - started, 1),
+        's_per_scene': round(sum(s['seconds'] for s in scenes) / len(scenes), 1) if scenes else None,
+        'camera': count('camera'), 'arm': count('arm'),
+        'arm_reached': sum(s['reached'] for s in scenes), 'held': sum(s['held'] is not None for s in scenes),
+        'params': params,
+    }
+    with open(Path(out).parent / 'capture_runs.jsonl', 'a') as f:
+        f.write(json.dumps(line) + '\n')
+
+
 def save(scene_dir, rgb, labels, frame):
     from PIL import Image as PILImage
     img = np.frombuffer(rgb.data, np.uint8).reshape(rgb.height, rgb.width, -1)
@@ -544,6 +565,7 @@ def main():
     TMP.mkdir(exist_ok=True)
 
     sim = Sim()
+    run_started, done, resumed, error = time.monotonic(), [], 0, None
     try:
         names = list(OBJECTS) + [f'distractor{i}' for i in range(len(DISTRACTORS))]
         sim.spin(2.0)
@@ -565,6 +587,7 @@ def main():
             scene_dir = opts.out / f'w{opts.seed:03d}_{n:05d}'
             if (scene_dir / 'scene.json').exists():
                 replay(rng, params)
+                resumed += 1
                 continue
             scene_dir.mkdir(parents=True, exist_ok=True)
             # Clear the table first, so bottles are never teleported into the arm.
@@ -615,10 +638,17 @@ def main():
                 'arm_base': ARM_BASE, 'table': TABLE,
                 'params': {'layout': {k: {**v, 'xy': [round(c, 3) for c in v['xy']]} for k, v in layout.items()},
                            'scene_params': params}}, indent=1))
+            done.append({'camera': family, 'arm': arm_kind, 'reached': arm_ok, 'held': held,
+                         'seconds': time.monotonic() - started})
             print(f'{scene_dir.name} cam={family} arm={arm_kind}/{arm_ok} '
                   f'objects={sorted(layout)} {time.monotonic() - started:.1f}s', flush=True)
+    except BaseException as e:
+        error = f'{type(e).__name__}: {e}'
+        raise
     finally:
         sim.close()
+        opts.out.mkdir(parents=True, exist_ok=True)
+        log_run(opts.out, opts, params, run_started, done, resumed, error)
 
 
 if __name__ == '__main__':
