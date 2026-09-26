@@ -10,7 +10,8 @@
   table (0, 0, table_height).
 
   Physics, plugins, light and ground are the bar world's, unchanged; its
-  comments say why they are what they are. Nothing stands on the table yet.
+  comments say why they are what they are. The bar's three bottles stand on
+  the table in a line 0.40 in front of the arm's base; there is no glass.
 -->
 <sdf version="1.9">
   <world name="workcell_world">
@@ -91,6 +92,63 @@
             <diffuse>0.4 0.4 0.4 1</diffuse>
           </material>
         </visual>
+      </link>
+    </model>
+    <!-- The bar's bottles, on the table top (z = table_height). Label plugins
+         tag them for segmentation cameras; the numbers are LABEL_IDS in
+         UR5-AlienBazaar/vlm training/vlm_labels.py, the same as the bar's.
+         scripts/capture_workcell_scenes.py moves them around per scene. -->
+    <include>
+      <uri>model://jack_daniels_bottle</uri>
+      <name>jack_daniels_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>1</label>
+      </plugin>
+      <pose>0.75 0.20 0.75 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://cola_bottle</uri>
+      <name>cola_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>2</label>
+      </plugin>
+      <pose>0.75 0.35 0.75 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://beer_bottle</uri>
+      <name>beer_bottle</name>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>3</label>
+      </plugin>
+      <pose>0.75 0.50 0.75 0 0 0</pose>
+    </include>
+
+    <!-- Held on by the DetachableJoint in beer_bottle's model.sdf, which finds
+         it by this name; see bar_world.sdf. 0.2581 is the bottle's lip. -->
+    <include>
+      <uri>model://beer_cap</uri>
+      <name>beer_cap</name>
+      <pose>0.75 0.50 1.0081 0 0 0</pose>
+    </include>
+    <!-- A fixed view of the whole cell for watching the twin
+         (scripts/workcell_viewer.py). Not a model of the real camera, whose
+         mount is not decided yet; the VLM captures use their own. -->
+    <model name="workcell_view_camera">
+      <static>true</static>
+      <pose>1.90 -0.40 1.50 0 0.487 2.583</pose>
+      <link name="link">
+        <sensor name="view_rgb" type="camera">
+          <always_on>true</always_on>
+          <update_rate>10</update_rate>
+          <topic>/workcell/view_camera/image_raw</topic>
+          <camera>
+            <horizontal_fov>1.2566</horizontal_fov>
+            <image><width>640</width><height>400</height><format>R8G8B8</format></image>
+            <clip><near>0.1</near><far>6.0</far></clip>
+          </camera>
+        </sensor>
       </link>
     </model>
   </world>
