@@ -12,3 +12,10 @@ photos/*
 !photos/*/
 photos/*/*
 !photos/*/labels.jsonl
+
+# Local VLM runs and failed calibration attempts are reproducible artifacts,
+# not source inputs.
+live_*.jsonl
+outputs_*.jsonl
+check_bottle_names.jsonl
+calibration/*.invalid.*

@@ -17,6 +17,7 @@ from torchvision import transforms
 
 from bottle_vision.camera import frames
 from bottle_vision.classifier import DinoBottleClassifier
+from bottle_vision import table
 from bottle_vision.serve import make_handler
 from bottle_vision.temporal import ProbabilitySmoother
 from bottle_vision.tracker import YOLOByteTracker
@@ -31,6 +32,7 @@ UNKNOWN_COLOUR = (160, 160, 160)
 class Pipeline:
     def __init__(self, args):
         self.args, self.lock, self.jpeg, self.objects = args, threading.Lock(), None, []
+        self.table = table.load(args.table_calib) if args.table_calib else None
         self.recent = {}  # track_id -> (frames since last seen, last /objects row)
         threading.Thread(target=self.loop, daemon=True).start()
 
@@ -53,7 +55,7 @@ class Pipeline:
             tracks = [track for track in tracker.update(frame) if track.track_id is not None]
             self.smoother.retain({track.track_id for track in tracks} | set(self.recent))
             objects = self.hold(self.label(frame, tracks), frame)
-            ok, encoded = cv2.imencode(".jpg", frame)
+            ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
             with self.lock:
                 if ok: self.jpeg = encoded.tobytes()
                 self.objects = objects
@@ -75,8 +77,18 @@ class Pipeline:
             draw(frame, track.track_id, label, score, track.box, 3)
             objects.append({"track_id": track.track_id, "label": label, "best_guess": self.classes[index], "score": round(score, 3),
                             "bbox": [x0, y0, x1, y1], "x": (x0 + x1) // 2, "y": (y0 + y1) // 2,
-                            "detector_score": round(track.confidence, 3), "found": True})
+                            "detector_score": round(track.confidence, 3), "found": True, **self.base_xy(track.box)})
         return objects
+
+    def base_xy(self, box):
+        if self.table is None:
+            return {}
+        # ponytail: box centre mapped as if it lay on the table plane. A tall
+        # bottle's centre is above the plane, so parallax offsets it outward
+        # from the image centre; subtract bottle height along the view ray if
+        # grasp accuracy needs it.
+        x, y = table.apply(self.table, ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2))
+        return {"x_base_mm": round(float(x), 1), "y_base_mm": round(float(y), 1)}
     def hold(self, objects, frame):
         """Keep a briefly-missed track on screen for --hold frames instead of blinking it out."""
         seen = {row["track_id"] for row in objects}
@@ -107,6 +119,7 @@ def main():
     parser.add_argument("--threshold", type=float, default=.6, help="minimum smoothed class probability to report a label")
     parser.add_argument("--history", type=int, default=15, help="frames of per-track probability smoothing")
     parser.add_argument("--hold", type=int, default=15, help="frames to keep showing a track after the detector loses it")
+    parser.add_argument("--table-calib", type=Path, help="calibrate_table.py output; adds x_base_mm/y_base_mm to /objects")
     parser.add_argument("--port", type=int, default=8770)
     args = parser.parse_args()
     ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(Pipeline(args))).serve_forever()
