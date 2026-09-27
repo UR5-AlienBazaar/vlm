@@ -5,13 +5,14 @@ from http.server import BaseHTTPRequestHandler
 
 
 def make_handler(pipeline):
-    """`pipeline` provides image() -> JPEG bytes | None and state() -> list of objects."""
+    """`pipeline` provides image() -> JPEG bytes | None, state() -> list of objects, and optionally position() -> dict."""
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_): pass
 
         def do_GET(self):
-            if self.path == "/objects":
-                body = json.dumps({"objects": pipeline.state(), "updated_at": time.time()}).encode()
+            if self.path in ("/objects", "/position"):
+                data = {"objects": pipeline.state(), "updated_at": time.time()} if self.path == "/objects" else pipeline.position()
+                body = json.dumps(data).encode()
                 self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
                 return
             self.send_response(200); self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")

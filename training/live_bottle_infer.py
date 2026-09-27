@@ -3,7 +3,8 @@
 
 GET /stream is the annotated MJPEG; GET /objects returns each tracked bottle's
 current box, pixel centre, smoothed label and score. Labels below --threshold
-are reported as null rather than guessed.
+are reported as null rather than guessed. With --cup-ref/--cup-ref-box the cup's
+middle point (cup_center_live.py) is drawn too and served at GET /position.
 """
 import argparse
 from http.server import ThreadingHTTPServer
@@ -21,6 +22,7 @@ from bottle_vision import table
 from bottle_vision.serve import make_handler
 from bottle_vision.temporal import ProbabilitySmoother
 from bottle_vision.tracker import YOLOByteTracker
+from training.cup_center_live import CupTracker
 
 
 # BGR, one distinct colour per drink; grey means "tracked but not sure what".
@@ -34,6 +36,7 @@ class Pipeline:
         self.args, self.lock, self.jpeg, self.objects = args, threading.Lock(), None, []
         self.table = table.load(args.table_calib) if args.table_calib else None
         self.recent = {}  # track_id -> (frames since last seen, last /objects row)
+        self.cup_position = {"found": False, "x": None, "y": None, "score": None, "updated_at": None}
         threading.Thread(target=self.loop, daemon=True).start()
 
     def image(self):
@@ -41,6 +44,9 @@ class Pipeline:
 
     def state(self):
         with self.lock: return list(self.objects)
+
+    def position(self):
+        with self.lock: return dict(self.cup_position)
 
     def loop(self):
         args = self.args
@@ -53,17 +59,21 @@ class Pipeline:
         self.preprocess = transforms.Compose([transforms.ToPILImage(), transforms.Resize(int(size * 1.14)), transforms.CenterCrop(size),
                                               transforms.ToTensor(), transforms.Normalize((.485, .456, .406), (.229, .224, .225))])
         tracker, self.smoother = YOLOByteTracker(args.weights, args.detect_conf, image_size=args.imgsz), ProbabilitySmoother(args.history)
+        cup = CupTracker(args.cup_model, args.cup_width, zip(args.cup_ref, args.cup_ref_box), args.cup_min_score, args.cup_alpha, self.device, args.cup_offset) if args.cup_ref else None
         for frame in frames(args.source):
             if frame.shape[1] != args.frame_width:  # mjpeg_relay.py shrinks frames; keep /objects and --table-calib in full-res pixels
                 frame = cv2.resize(frame, (args.frame_width, round(frame.shape[0] * args.frame_width / frame.shape[1])))
             tracks = [track for track in tracker.update(frame) if track.track_id is not None]
+            cup_position = self.locate_cup(cup, frame) if cup else None  # before label() draws on the frame
             self.smoother.retain({track.track_id for track in tracks} | set(self.recent))
             objects = self.hold(self.label(frame, tracks), frame)
+            if cup: cup.draw(frame)
             view = cv2.resize(frame, (args.stream_width, round(frame.shape[0] * args.stream_width / frame.shape[1]))) if frame.shape[1] > args.stream_width else frame
             ok, encoded = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 70])
             with self.lock:
                 if ok: self.jpeg = encoded.tobytes()
                 self.objects = objects
+                if cup_position: self.cup_position = cup_position
 
     def label(self, frame, tracks):
         """Classify each tracked crop, draw it on `frame`, and return its /objects rows."""
@@ -95,6 +105,14 @@ class Pipeline:
         # grasp accuracy needs it.
         x, y = table.apply(self.table, ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2))
         return {"x_base_mm": round(float(x), 1), "y_base_mm": round(float(y), 1)}
+    def locate_cup(self, cup, frame):
+        position = cup.update(frame)
+        if position["found"] and self.table is not None:
+            # The cup rim is close enough to the table plane that no parallax correction is needed.
+            x, y = table.apply(self.table, (position["x"], position["y"]))
+            position |= {"x_base_mm": round(float(x), 1), "y_base_mm": round(float(y), 1)}
+        return position
+
     def hold(self, objects, frame):
         """Keep a briefly-missed track on screen for --hold frames instead of blinking it out."""
         seen = {row["track_id"] for row in objects}
@@ -129,7 +147,17 @@ def main():
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--frame-width", type=int, default=1280, help="camera's native width; smaller relayed frames are scaled back to it")
     parser.add_argument("--stream-width", type=int, default=960, help="width of the /stream preview; /objects stays in full-res pixels")
+    parser.add_argument("--cup-ref", action="append", default=[], help="cam0 frame showing the cup; pair each with --cup-ref-box")
+    parser.add_argument("--cup-ref-box", type=int, nargs=4, action="append", default=[], metavar=("X0", "Y0", "X1", "Y1"))
+    parser.add_argument("--cup-model", default="facebook/dinov2-small")
+    parser.add_argument("--cup-width", type=int, default=896, help="DINOv2 input width for the cup matcher")
+    parser.add_argument("--cup-min-score", type=float, default=.08, help="cup-minus-background score below which the cup is not found")
+    parser.add_argument("--cup-alpha", type=float, default=.5, help="cup centre smoothing: 1 = none")
+    parser.add_argument("--cup-offset", type=int, nargs=2, default=[-20, 0], metavar=("DX", "DY"),
+                        help="px added to the matched centre; -20 0 suits the orange cup, a clear cup needs ~0 0")
     args = parser.parse_args()
+    if len(args.cup_ref) != len(args.cup_ref_box):
+        parser.error("give one --cup-ref-box per --cup-ref")
     ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(Pipeline(args))).serve_forever()
 
 
