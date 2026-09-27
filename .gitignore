@@ -19,3 +19,6 @@ live_*.jsonl
 outputs_*.jsonl
 check_bottle_names.jsonl
 calibration/*.invalid.*
+
+# YOLO weights: ultralytics downloads them by name on first use.
+*.pt

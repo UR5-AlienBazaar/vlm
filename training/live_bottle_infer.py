@@ -59,8 +59,12 @@ class Pipeline:
             tracks = [track for track in tracker.update(frame) if track.track_id is not None]
             self.smoother.retain({track.track_id for track in tracks} | set(self.recent))
             objects = self.hold(self.label(frame, tracks), frame)
+<<<<<<< HEAD
             view = cv2.resize(frame, (args.stream_width, round(frame.shape[0] * args.stream_width / frame.shape[1]))) if frame.shape[1] > args.stream_width else frame
             ok, encoded = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 70])
+=======
+            ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+>>>>>>> d88e2ed29d4091eb73865d927bacd7970f03d869
             with self.lock:
                 if ok: self.jpeg = encoded.tobytes()
                 self.objects = objects
