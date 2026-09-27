@@ -21,12 +21,12 @@ from PIL import Image
 # glass_b is ROADMAP Phase D's second glass at (-0.04, 0.55), for arm B. It is
 # here now so the answer format does not change, and force a retrain, when it lands.
 # Never renumber: old captures and frozen sets keep these meanings. The real
-# bar's six drinks are whiskey (Jack Daniel's), beer (Heineken), vodka
-# (Zubrowka), liqueur (Jagermeister), gin (Tenjaku) and wine (Frontera). cola
-# (2) is retired: kept so old captures still decode, never emitted again or
-# reused. Ballantine's is on the real bar but not served: a named distractor.
+# bar's served drinks are whiskey (Jack Daniel's), cola, beer (Heineken), vodka
+# (Zubrowka), liqueur (Jagermeister), gin (Tenjaku), wine (Frontera), Mirinda
+# and 7UP.  Keep all existing values stable: old captures decode with the same
+# meaning. Ballantine's is on the real bar but not served: a named distractor.
 LABEL_IDS = {'whiskey': 1, 'cola': 2, 'beer': 3, 'vodka': 4, 'liqueur': 5, 'gin': 6, 'wine': 7,
-             'glass': 10, 'glass_b': 11, 'distractor': 20, 'ballantines': 29}
+             'mirinda': 8, '7up': 9, 'glass': 10, 'glass_b': 11, 'distractor': 20, 'ballantines': 29}
 # Every label in 20-29 is a distractor. The workcell capture gives each one its
 # own id so two distractors standing together never merge into one box.
 DISTRACTOR_IDS = range(20, 30)

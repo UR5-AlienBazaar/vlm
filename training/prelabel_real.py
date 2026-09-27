@@ -16,21 +16,23 @@ from pathlib import Path
 from vlm_labels import PROMPT, chat_record
 
 MODEL = 'Qwen/Qwen3-VL-8B-Instruct'
-BOTTLES = ('whiskey', 'vodka', 'liqueur', 'beer', 'gin', 'wine')
+BOTTLES = ('whiskey', 'cola', 'beer', 'vodka', 'liqueur', 'gin', 'wine', 'mirinda', '7up')
 GLASS = 'glass'
 
 # Only the pre-labeller sees brand descriptions; the trained model must learn
 # the bottles from the labels, as with the sim data.
 REAL_BAR_PROMPT = (
-    'You are the camera of a robot bartender. The bar has six bottles, named exactly: '
+    'You are the camera of a robot bartender. The bar has nine bottles, named exactly: '
     '"whiskey" (Jack Daniel\'s, square bottle with a black label), '
+    '"cola" (cola bottle), '
     '"vodka" (Zubrowka, clear bottle with a bison on the label), '
     '"liqueur" (Jagermeister, dark green bottle with a stag on the label), '
     '"beer" (Heineken, green bottle with a red star), '
-    '"gin" (Tenjaku gin) and "wine" (Frontera white wine). '
+    '"gin" (Tenjaku gin), "wine" (Frontera white wine), "mirinda" (Mirinda), '
+    'and "7up" (7UP). '
     'Every cup or drinking glass is named "glass". Any other bottle or object is a distractor, '
     'never one of these names.\n' + PROMPT +
-    '\nList all six bottles, with visible false and bbox null for ones you cannot see, and one '
+    '\nList all nine bottles, with visible false and bbox null for ones you cannot see, and one '
     '"glass" entry per cup. Answer with the JSON object only.')
 
 

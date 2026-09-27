@@ -3,7 +3,7 @@ import json
 from prelabel_real import BOTTLES, canonical_label
 
 
-def test_answer_becomes_all_six_bottles_with_unknowns_dropped():
+def test_answer_becomes_all_inventory_bottles_with_unknowns_dropped():
     answer = '```json\n' + json.dumps({
         'bottles': [{'name': 'liqueur', 'visible': True, 'confidence': 0.8, 'bbox': [1, 2, 3, 4]},
                     {'name': "Ballantine's", 'visible': True, 'confidence': 0.9, 'bbox': [5, 6, 7, 8]},
@@ -21,7 +21,7 @@ def test_answer_becomes_all_six_bottles_with_unknowns_dropped():
     assert not by_name['vodka']['visible'] and by_name['vodka']['bbox'] is None
     assert not by_name['whiskey']['visible']
     assert [g['bbox'] for g in label['glasses']] == [[10, 20, 30, 40]]
-    assert label['in_gripper']['value'] is None
+    assert label['in_gripper']['value'] == 'cola'
     assert label['obstruction']['value'] is True
 
 
