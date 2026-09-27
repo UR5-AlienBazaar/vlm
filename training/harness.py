@@ -37,9 +37,10 @@ SEED_PROMPT = (
     'Answer with JSON only, listing all six bottles:\n'
     '{"bottles": [{"name": "whiskey|vodka|liqueur|beer|gin|wine", "visible": true|false, "upright": true|false|null, '
     '"blocked": true|false|null, "bbox": [x0, y0, x1, y1] or null}], '
-    '"next_action": {"action": "pick|clear_path|report_fallen|not_found", "target": "{order}"}}\n'
+    '"next_action": {"action": "already_holding|pick|clear_path|report_fallen|not_found", "target": "{order}"}}\n'
     'bbox is in 0-1000 image coordinates. upright is false when a bottle lies on its side. blocked is '
-    'true when another object stands between the robot arm and the bottle. next_action: not_found if '
+    'true when another object stands between the robot arm and the bottle. next_action: already_holding if '
+    'the ordered bottle is already in the robot\'s gripper, not_found if '
     'the ordered bottle is not visible, report_fallen if it is lying down, clear_path if it is blocked, '
     'otherwise pick.')
 REWRITE_TEMPERATURE = 0.8

@@ -20,7 +20,7 @@ BOTTLES = ('whiskey', 'vodka', 'liqueur', 'beer', 'gin', 'wine')  # the real bar
 # A distractor this close to the straight line from the arm base to a bottle
 # is in the gripper's way: its ~5cm radius plus the open fingers' clearance.
 BLOCK_RADIUS = 0.07
-ACTIONS = ('pick', 'clear_path', 'report_fallen', 'not_found')
+ACTIONS = ('already_holding', 'pick', 'clear_path', 'report_fallen', 'not_found')
 FIELDS = ('visible', 'upright', 'blocked', 'iou', 'action')
 # Selection score. The action is what the robot acts on, so it dominates.
 WEIGHTS = {'action': 0.4, 'visible': 0.2, 'upright': 0.15, 'blocked': 0.15, 'iou': 0.1}
@@ -50,10 +50,13 @@ def next_action(bottles, order):
 
     A bottle the camera cannot see is 'not_found' whether it is missing or
     hidden: the picture cannot tell those apart, and either way the robot must
-    not reach for it.
+    not reach for it. A bottle already in the gripper comes first: the robot
+    must not go looking for what it holds.
     """
     b = bottles[order]
-    if not b['visible']:
+    if b.get('in_gripper'):
+        action = 'already_holding'
+    elif not b['visible']:
         action = 'not_found'
     elif not b['upright']:
         action = 'report_fallen'
@@ -72,6 +75,7 @@ def scene_truth(scene_dir):
     labels = np.asarray(Image.open(scene_dir / '0000_cam_labels.png'))
     objects = frame['objects']
     arm_base = meta.get('arm_base', (0.35, 0.35))
+    held = frame.get('in_gripper')
     bottles = {}
     for name in BOTTLES:
         obj = objects.get(name, {'on_table': False})
@@ -81,7 +85,9 @@ def scene_truth(scene_dir):
             'visible': box is not None,
             'bbox': box,
             'on_table': on_table,
-            'upright': bool(obj.get('upright', True)) if on_table else None,
+            'in_gripper': name == held,
+            # A held bottle hangs upright in the fingers, clear of everything on the table.
+            'upright': bool(obj.get('upright', True)) if on_table else (True if name == held else None),
             'blocked': bool(on_table and 'xy' in obj and blocked(obj['xy'], arm_base, objects)),
         }
     order = order_for(scene_dir.name)
@@ -94,6 +100,7 @@ def scene_truth(scene_dir):
         'distractors': str(n_distractors),
         'action': action['action'],
         'hidden': str(target['on_table'] and not target['visible']).lower(),
+        'held': str(held is not None).lower(),
     }
     return {'scene': scene_dir.name, 'order': order, 'bottles': bottles,
             'next_action': action, 'buckets': buckets}
