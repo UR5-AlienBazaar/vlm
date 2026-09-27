@@ -21,11 +21,11 @@ PROMPT = (
 )
 STRICT_CONTRACT = (
     "\n\nUse this robot inventory contract exactly. A bottle entry's name must be one of: "
-    "whiskey, vodka, liqueur, beer, gin, wine. Whiskey is reserved only for a Jack Daniel's "
+    "whiskey, cola, vodka, liqueur, beer, gin, wine, mirinda, 7up. Whiskey is reserved only for a Jack Daniel's "
     "bottle: square with the black-and-white Jack Daniel's label. Never use whiskey as a generic "
     "category for another whisky. Map Jack Daniel's to whiskey; Zubrowka to vodka; "
     "Jagermeister (including Jägermeister) to liqueur; Heineken to beer; Tenjaku to gin; and "
-    "Frontera white wine to wine. Ballantine's (brown bottle, cream label and white cap) is a "
+    "Frontera white wine to wine, Mirinda to mirinda, and 7UP to 7up. Ballantine's (brown bottle, cream label and white cap) is a "
     "distractor: never report it as whiskey or as any bottle. Do not report any unlisted brand "
     "or object. Do not duplicate a bottle name. "
     "A human hand is not the robot gripper, so in_gripper must be null unless a robot gripper is "

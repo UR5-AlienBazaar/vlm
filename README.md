@@ -4,22 +4,23 @@
 owns model runtime, model versions, training and evaluation. It does **not**
 own ROS nodes, robot motion, camera drivers, or robot safety decisions.
 
-The service currently starts in safe mock mode. Its mock response is
-`observation.status = "unknown"`, never an empty observed scene, so an
-unconfigured model cannot make a robot assume that an object is absent.
+The model is Qwen3-VL served by vLLM on the GPU instance; this repo talks to
+its OpenAI-compatible endpoint. Nothing here runs the model locally.
 
 ## Run
 
-```powershell
-$env:VLM_HOST = "127.0.0.1"
-$env:VLM_PORT = "8080"
-python -m vlm.server
+On the GPU instance:
+
+```bash
+vllm serve <sft-r1 checkpoint> --served-model-name sft-r1 --port 8101
 ```
 
-Check it with:
+From the laptop, tunnel it and test:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8080/healthz
+ssh -L 8101:localhost:8101 shadeform@<host>
+python training/eval_bottles.py photos --strict-contract --out bottles_sft_r1_strict.jsonl
+python training/stream_vlm.py --source 0 --endpoint http://localhost:8101 --model sft-r1 --show
 ```
 
 ## API
@@ -50,12 +51,8 @@ controls. Pin deployment to an image digest or release tag and retain
 ## Development
 
 ```powershell
-python -m unittest discover -s tests -v
+python -m pytest training
 ```
-
-The first real-model change belongs behind the `SceneAnalyzer` interface in
-`vlm/analyzer.py`; it must preserve the JSON contract and add measured
-confidence/evaluation coverage before changing the default mode.
 
 ## Training data
 
