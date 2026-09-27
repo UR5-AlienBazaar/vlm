@@ -87,6 +87,7 @@ def main() -> None:
                         help="Maximum image pixels sent to vLLM (default: 3,000,000).")
     parser.add_argument("--strict-contract", action="store_true",
                         help="Constrain bottle names and known real-bar mappings in the request.")
+    parser.add_argument("--prompt-file", type=Path, help="Use this prompt instead of the built-in one.")
     args = parser.parse_args()
 
     photos = sorted(p for p in args.photos.rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES)
@@ -95,6 +96,8 @@ def main() -> None:
     if args.limit is not None:
         photos = photos[:args.limit]
     prompt = PROMPT + STRICT_CONTRACT if args.strict_contract else PROMPT
+    if args.prompt_file:
+        prompt = args.prompt_file.read_text(encoding="utf-8")
 
     with args.out.open("w", encoding="utf-8") as out:
         for index, photo in enumerate(photos, start=1):

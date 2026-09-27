@@ -14,9 +14,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capture_dirs", type=Path, nargs="+")
     parser.add_argument("--out", type=Path, default=Path("data/bottle-yolo"))
+    parser.add_argument("--burst-gap", type=float, default=20.0, help="seconds of silence that start a new unpaired group")
     args = parser.parse_args()
     for root in args.capture_dirs:
-        for record, _group, split in grouped_records(root):
+        for record, _group, split in grouped_records(root, args.burst_gap):
             # Identity is the classifier's job; the detector only has to find every bottle.
             boxes = [a["bbox"] for a in record["annotations"] if a["label"] in LABELS]
             width, height = record["width"], record["height"]

@@ -16,10 +16,14 @@ def make_handler(pipeline):
                 return
             self.send_response(200); self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
             self.send_header("Cache-Control", "no-cache"); self.end_headers()
+            sent = None
             try:
                 while True:
                     image = pipeline.image()
-                    if image:
+                    # Resending unchanged frames saturates the SSH tunnel and
+                    # the viewer then lags ever further behind real time.
+                    if image and image is not sent:
+                        sent = image
                         self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(image)).encode() + b"\r\n\r\n" + image + b"\r\n")
                     time.sleep(1 / 15)
             except (BrokenPipeError, ConnectionResetError):
