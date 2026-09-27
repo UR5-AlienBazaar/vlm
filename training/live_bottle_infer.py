@@ -44,6 +44,8 @@ class Pipeline:
 
     def loop(self):
         args = self.args
+        # Brev's cores are shared with Gazebo; torch's default of one thread per core thrashes there.
+        torch.set_num_threads(4); cv2.setNumThreads(4)
         checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True); self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.classes = checkpoint["classes"]
         self.model = DinoBottleClassifier(checkpoint["model_id"], self.classes).to(self.device).eval(); self.model.load_state_dict(checkpoint["model"])
@@ -52,10 +54,13 @@ class Pipeline:
                                               transforms.ToTensor(), transforms.Normalize((.485, .456, .406), (.229, .224, .225))])
         tracker, self.smoother = YOLOByteTracker(args.weights, args.detect_conf, image_size=args.imgsz), ProbabilitySmoother(args.history)
         for frame in frames(args.source):
+            if frame.shape[1] != args.frame_width:  # mjpeg_relay.py shrinks frames; keep /objects and --table-calib in full-res pixels
+                frame = cv2.resize(frame, (args.frame_width, round(frame.shape[0] * args.frame_width / frame.shape[1])))
             tracks = [track for track in tracker.update(frame) if track.track_id is not None]
             self.smoother.retain({track.track_id for track in tracks} | set(self.recent))
             objects = self.hold(self.label(frame, tracks), frame)
-            ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            view = cv2.resize(frame, (args.stream_width, round(frame.shape[0] * args.stream_width / frame.shape[1]))) if frame.shape[1] > args.stream_width else frame
+            ok, encoded = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 70])
             with self.lock:
                 if ok: self.jpeg = encoded.tobytes()
                 self.objects = objects
@@ -67,7 +72,8 @@ class Pipeline:
         if not crops:
             return []
         batch = torch.stack([self.preprocess(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)) for crop in crops]).to(self.device)
-        with torch.inference_mode():
+        # Trained under bf16 autocast; fp32 DINOv2-large is ~9x slower and caps the stream at ~2 fps.
+        with torch.inference_mode(), torch.autocast(self.device, dtype=torch.bfloat16, enabled=self.device == "cuda"):
             probabilities = torch.softmax(self.model(batch).float(), 1).cpu().numpy()
         objects = []
         for track, raw in zip(tracks, probabilities):
@@ -121,6 +127,8 @@ def main():
     parser.add_argument("--hold", type=int, default=15, help="frames to keep showing a track after the detector loses it")
     parser.add_argument("--table-calib", type=Path, help="calibrate_table.py output; adds x_base_mm/y_base_mm to /objects")
     parser.add_argument("--port", type=int, default=8770)
+    parser.add_argument("--frame-width", type=int, default=1280, help="camera's native width; smaller relayed frames are scaled back to it")
+    parser.add_argument("--stream-width", type=int, default=960, help="width of the /stream preview; /objects stays in full-res pixels")
     args = parser.parse_args()
     ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(Pipeline(args))).serve_forever()
 

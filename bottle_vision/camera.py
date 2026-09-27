@@ -1,13 +1,12 @@
 """Open a webcam, video, or the robot's multipart MJPEG feed."""
+import threading
 import time
 import urllib.request
 
 import numpy as np
 
 
-def mjpeg_frames(url: str, timeout: float = 5.0):
-    """Yield newest JPEG frames; reconnect after a camera/tunnel interruption."""
-    import cv2
+def _read_jpegs(url: str, timeout: float):
     while True:
         try:
             with urllib.request.urlopen(url, timeout=timeout) as response:
@@ -19,14 +18,30 @@ def mjpeg_frames(url: str, timeout: float = 5.0):
                     data += chunk
                     end = data.rfind(b"\xff\xd9")
                     start = data.rfind(b"\xff\xd8", 0, end)
-                    if start < 0 or end < 0:
-                        continue
-                    jpeg, data = data[start:end + 2], data[end + 2:]
-                    image = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
-                    if image is not None:
-                        yield image
+                    if start >= 0 and end >= 0:
+                        jpeg, data = data[start:end + 2], data[end + 2:]
+                        yield jpeg
         except (OSError, ConnectionError):
             time.sleep(1)
+
+
+def mjpeg_frames(url: str, timeout: float = 5.0):
+    """Yield newest JPEG frames; reconnect after a camera/tunnel interruption."""
+    import cv2
+    # A consumer slower than the camera would otherwise read an ever-growing
+    # backlog from the socket, so a thread drains it and older frames are dropped.
+    latest, fresh = [None], threading.Event()
+
+    def drain():
+        for jpeg in _read_jpegs(url, timeout):
+            latest[0] = jpeg; fresh.set()
+
+    threading.Thread(target=drain, daemon=True).start()
+    while True:
+        fresh.wait(); fresh.clear()
+        image = cv2.imdecode(np.frombuffer(latest[0], np.uint8), cv2.IMREAD_COLOR)
+        if image is not None:
+            yield image
 
 
 def frames(source: str):
