@@ -116,7 +116,7 @@ def enrol(matcher, ref_boxes, pad=1):
     return torch.cat(cup), torch.cat(background)
 
 
-def locate(matcher, frame, ref, min_score):
+def locate(matcher, frame, ref, min_score, offset=CENTRE_OFFSET):
     """Cup centre and its matched-region box, both in source pixels, and the match score.
 
     score = similarity to the cup minus similarity to the background, so ~0 on
@@ -134,14 +134,50 @@ def locate(matcher, frame, ref, min_score):
     py, px = np.unravel_index(score.argmax(), score.shape)
     ys, xs = np.nonzero(labels == labels[py, px])
     w = score[ys, xs]
-    cx = (np.average(xs, weights=w) + 0.5) * sx + CENTRE_OFFSET[0]
-    cy = (np.average(ys, weights=w) + 0.5) * sy + CENTRE_OFFSET[1]
+    cx = (np.average(xs, weights=w) + 0.5) * sx + offset[0]
+    cy = (np.average(ys, weights=w) + 0.5) * sy + offset[1]
     # box size from the tighter core blob, centred on the corrected middle
     _, core = cv2.connectedComponents((score > peak * 0.6).astype(np.uint8))
     ys, xs = np.nonzero(core == core[py, px])
     hw, hh = (xs.max() + 1 - xs.min()) * sx * BOX_SCALE / 2, (ys.max() + 1 - ys.min()) * sy * BOX_SCALE / 2
     box = (cx - hw, cy - hh, cx + hw, cy + hh)
     return (cx, cy), box, peak
+
+
+class CupTracker:
+    """Enrolled cup matcher with centre smoothing.
+
+    update() only reads the frame, so other detectors can share it before draw() marks it up.
+    """
+
+    def __init__(self, model_id, width, ref_boxes, min_score, alpha, device='cuda', offset=CENTRE_OFFSET):
+        self.matcher = PatchMatcher(model_id, width, device)
+        self.ref = enrol(self.matcher, ref_boxes)
+        self.min_score, self.alpha, self.offset, self.smooth, self.box, self.score = min_score, alpha, offset, None, None, 0.0
+        print(f'enrolled {len(self.ref[0])} cup / {len(self.ref[1])} background patches', flush=True)
+
+    def update(self, frame):
+        """The /position dict for this frame."""
+        centre, self.box, self.score = locate(self.matcher, frame, self.ref, self.min_score, self.offset)
+        self.smooth = None if centre is None else centre if self.smooth is None else tuple(
+            self.alpha * c + (1 - self.alpha) * s for c, s in zip(centre, self.smooth))
+        smooth = self.smooth
+        return {'found': smooth is not None,
+                'x': int(smooth[0]) if smooth else None, 'y': int(smooth[1]) if smooth else None,
+                'score': round(self.score, 3), 'updated_at': time.time()}
+
+    def draw(self, frame):
+        if self.smooth is None:
+            cv2.putText(frame, f'CUP NOT FOUND (best score {self.score:.2f})', (30, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+            return
+        cx, cy = int(self.smooth[0]), int(self.smooth[1])
+        x0, y0, x1, y1 = (int(v) for v in self.box)
+        cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 0, 255), 3)
+        cv2.drawMarker(frame, (cx, cy), (0, 255, 0), cv2.MARKER_CROSS, 40, 3)
+        cv2.circle(frame, (cx, cy), 6, (0, 255, 0), -1)
+        cv2.putText(frame, f'cup ({cx},{cy}) score {self.score:.2f}', (cx + 25, cy - 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
 
 class Pipeline:
@@ -154,39 +190,20 @@ class Pipeline:
 
     def _loop(self):
         o = self.opts
-        matcher = PatchMatcher(o.model, o.width, 'cuda')
-        ref = enrol(matcher, zip(o.ref, o.ref_box))
-        print(f'enrolled {len(ref[0])} cup / {len(ref[1])} background patches '
-              f'from {len(o.ref)} frame(s)', flush=True)
-        smooth, last_report, fps = None, 0.0, 0.0
+        cup = CupTracker(o.model, o.width, zip(o.ref, o.ref_box), o.min_score, o.alpha)
+        last_report, fps = 0.0, 0.0
         for frame in mjpeg_frames(o.source):
             t = time.time()
-            centre, box, score = locate(matcher, frame, ref, o.min_score)
-            if centre is not None:
-                smooth = centre if smooth is None else tuple(
-                    o.alpha * c + (1 - o.alpha) * s for c, s in zip(centre, smooth))
-                cx, cy = int(smooth[0]), int(smooth[1])
-                x0, y0, x1, y1 = (int(v) for v in box)
-                cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 0, 255), 3)
-                cv2.drawMarker(frame, (cx, cy), (0, 255, 0), cv2.MARKER_CROSS, 40, 3)
-                cv2.circle(frame, (cx, cy), 6, (0, 255, 0), -1)
-                cv2.putText(frame, f'cup ({cx},{cy}) score {score:.2f}', (cx + 25, cy - 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            else:
-                smooth = None
-                cv2.putText(frame, f'CUP NOT FOUND (best score {score:.2f})', (30, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+            position = cup.update(frame)
+            cup.draw(frame)
             fps = 0.9 * fps + 0.1 / max(time.time() - t, 1e-3)
             cv2.putText(frame, f'{fps:.1f} fps (GPU)', (30, frame.shape[0] - 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             if time.time() - last_report > o.report:
-                print(f'{time.strftime("%H:%M:%S")} centre={smooth and tuple(int(v) for v in smooth)} '
-                      f'score={score:.2f} fps={fps:.1f}', flush=True)
+                print(f'{time.strftime("%H:%M:%S")} centre={position["x"], position["y"]} '
+                      f'score={position["score"]:.2f} fps={fps:.1f}', flush=True)
                 last_report = time.time()
             ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            position = {'found': centre is not None,
-                        'x': int(smooth[0]) if smooth else None, 'y': int(smooth[1]) if smooth else None,
-                        'score': round(score, 3), 'updated_at': time.time()}
             with self.lock:
                 if ok:
                     self.jpeg = buf.tobytes()
