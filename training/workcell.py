@@ -125,7 +125,9 @@ def read_answer(text):
     try:
         answer = json.loads(match.group(0))
         bottles = {str(b['name']).lower(): b for b in answer['bottles'] if isinstance(b, dict)}
-        action = str(answer['next_action']['action'])
+        # Qwen2.5-VL-7B writes the action as a bare string; the meaning is the same.
+        action = answer['next_action']
+        action = str(action['action'] if isinstance(action, dict) else action)
     except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
         return None
     return {'bottles': bottles, 'action': action}
