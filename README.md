@@ -68,3 +68,10 @@ values in that repo's `bar_world.sdf`:
 $env:BAR_WORLD_SDF = "..\bartender_robot_sim\ros2_ws\src\bartender_gazebo\worlds\bar_world.sdf"
 python -m pytest training
 ```
+
+## Cup position for pour planning
+
+`training/cup_center_live.py` locates the orange cup in the real overhead
+camera feed and serves its pixel position for the pour planner to consume.
+See [`training/CUP_TRACKER.md`](training/CUP_TRACKER.md) for how to run it,
+the HTTP/ROS2 endpoints, and known limitations (pixel-only, no depth yet).

@@ -8,4 +8,7 @@ build/
 *.egg-info/
 data/
 outputs/
-photos/
+photos/*
+!photos/*/
+photos/*/*
+!photos/*/labels.jsonl
